@@ -158,8 +158,8 @@ func (s *Simple) fetch(key string, ltv *lockingTimedValue) {
 	staleDuration = s.config.BadStaleDuration
 	expiryDuration = s.config.BadExpiryDuration
 
-	// NOTE: new error always replaces old error
-	if ltv.tv.Err != nil {
+	// NOTE: new error overwrites previous error, and also used when initial value
+	if ltv.tv == nil || ltv.tv.Err != nil {
 		ltv.tv = newTimedValue(value, err, staleDuration, expiryDuration)
 		return
 	}
