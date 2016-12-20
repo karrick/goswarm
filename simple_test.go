@@ -29,8 +29,8 @@ func failingLookup(_ string) (interface{}, error) {
 
 ////////////////////////////////////////
 
-func ensureError(t *testing.T, swr *Swarm, key, expectedError string) {
-	value, err := swr.LoadStore(key)
+func ensureError(t *testing.T, swr *Simple, key, expectedError string) {
+	value, err := swr.Query(key)
 	if value != nil {
 		t.Errorf("Actual: %#v; Expected: %#v", value, nil)
 	}
@@ -39,8 +39,8 @@ func ensureError(t *testing.T, swr *Swarm, key, expectedError string) {
 	}
 }
 
-func ensureValue(t *testing.T, swr *Swarm, key string, expectedValue uint64) {
-	value, err := swr.LoadStore(key)
+func ensureValue(t *testing.T, swr *Simple, key string, expectedValue uint64) {
+	value, err := swr.Query(key)
 	if value.(uint64) != expectedValue {
 		t.Errorf("Actual: %d; Expected: %d", value, expectedValue)
 	}
@@ -53,13 +53,14 @@ func ensureValue(t *testing.T, swr *Swarm, key string, expectedValue uint64) {
 
 func TestSwarmSynchronousLookupWhenMiss(t *testing.T) {
 	var invoked uint64
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
 		return uint64(42), nil
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	ensureValue(t, swr, "miss", 42)
 
@@ -69,20 +70,22 @@ func TestSwarmSynchronousLookupWhenMiss(t *testing.T) {
 }
 
 func TestSwarmNoStaleNoExpireNoLookupWhenHit(t *testing.T) {
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		t.Fatal("lookup ought not to have been invoked")
 		return nil, errors.New("lookup ought not to have been invoked")
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
+
 	swr.Store("hit", uint64(13))
 
 	ensureValue(t, swr, "hit", 13)
 }
 
 func TestSwarmNoStaleExpireNoLookupWhenBeforeExpire(t *testing.T) {
-	swr, err := NewSwarm(&Config{
+	swr, err := NewSimple(&Config{
 		Lookup: func(_ string) (interface{}, error) {
 			t.Fatal("lookup ought not to have been invoked")
 			return nil, errors.New("lookup ought not to have been invoked")
@@ -90,6 +93,7 @@ func TestSwarmNoStaleExpireNoLookupWhenBeforeExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that expires one minute in the future
 	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Expiry: time.Now().Add(time.Minute)})
@@ -99,13 +103,14 @@ func TestSwarmNoStaleExpireNoLookupWhenBeforeExpire(t *testing.T) {
 
 func TestSwarmNoStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	var invoked uint64
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
 		return uint64(42), nil
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that expired one minute ago
 	swr.Store("hit", &TimedValue{Value: uint64(42), Err: nil, Expiry: time.Now().Add(-time.Minute)})
@@ -118,7 +123,7 @@ func TestSwarmNoStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 }
 
 func TestSwarmStaleNoExpireNoLookupWhenBeforeStale(t *testing.T) {
-	swr, err := NewSwarm(&Config{
+	swr, err := NewSimple(&Config{
 		Lookup: func(_ string) (interface{}, error) {
 			t.Fatal("lookup ought not to have been invoked")
 			return nil, errors.New("lookup ought not to have been invoked")
@@ -126,6 +131,7 @@ func TestSwarmStaleNoExpireNoLookupWhenBeforeStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that goes stale one minute in the future
 	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(time.Minute)})
@@ -136,7 +142,7 @@ func TestSwarmStaleNoExpireNoLookupWhenBeforeStale(t *testing.T) {
 func TestSwarmStaleNoExpireSynchronousLookupOnlyOnceWhenAfterStale(t *testing.T) {
 	var wg sync.WaitGroup
 	var invoked uint64
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		time.Sleep(5 * time.Millisecond)
 		atomic.AddUint64(&invoked, 1)
 		wg.Done()
@@ -145,6 +151,7 @@ func TestSwarmStaleNoExpireSynchronousLookupOnlyOnceWhenAfterStale(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one minute ago
 	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(-time.Minute)})
@@ -164,7 +171,7 @@ func TestSwarmStaleNoExpireSynchronousLookupOnlyOnceWhenAfterStale(t *testing.T)
 }
 
 func TestSwarmStaleExpireNoLookupWhenBeforeStale(t *testing.T) {
-	swr, err := NewSwarm(&Config{
+	swr, err := NewSimple(&Config{
 		Lookup: func(_ string) (interface{}, error) {
 			t.Fatal("lookup ought not to have been invoked")
 			return nil, errors.New("lookup ought not to have been invoked")
@@ -172,6 +179,7 @@ func TestSwarmStaleExpireNoLookupWhenBeforeStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that goes stale one minute in the future and expires one hour in the future
 	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(time.Minute), Expiry: time.Now().Add(time.Hour)})
@@ -182,7 +190,7 @@ func TestSwarmStaleExpireNoLookupWhenBeforeStale(t *testing.T) {
 func TestSwarmStaleExpireSynchronousLookupWhenAfterStaleAndBeforeExpire(t *testing.T) {
 	var wg sync.WaitGroup
 	var invoked uint64
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
 		wg.Done()
 		return uint64(42), nil
@@ -190,6 +198,7 @@ func TestSwarmStaleExpireSynchronousLookupWhenAfterStaleAndBeforeExpire(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one minute ago and expires one minute in the future
 	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(-time.Minute), Expiry: time.Now().Add(time.Minute)})
@@ -210,13 +219,14 @@ func TestSwarmStaleExpireSynchronousLookupWhenAfterStaleAndBeforeExpire(t *testi
 
 func TestSwarmStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	var invoked uint64
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
 		return uint64(42), nil
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one hour ago and expired one minute ago
 	swr.Store("hit", &TimedValue{Value: uint64(42), Err: nil, Stale: time.Now().Add(-time.Hour), Expiry: time.Now().Add(-time.Minute)})
@@ -231,7 +241,7 @@ func TestSwarmStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 func TestSwarmErrDoesNotReplaceStaleValue(t *testing.T) {
 	var wg sync.WaitGroup
 	var invoked uint64
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
 		wg.Done()
 		return nil, errors.New("fetch error")
@@ -239,6 +249,7 @@ func TestSwarmErrDoesNotReplaceStaleValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one minute ago
 	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(-time.Minute)})
@@ -261,7 +272,7 @@ func TestSwarmErrDoesNotReplaceStaleValue(t *testing.T) {
 func TestSwarmNewErrReplacesOldError(t *testing.T) {
 	var wg sync.WaitGroup
 	var invoked uint64
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
 		wg.Done()
 		return nil, errors.New("new error")
@@ -269,6 +280,7 @@ func TestSwarmNewErrReplacesOldError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one minute ago
 	swr.Store("hit", &TimedValue{Value: nil, Err: errors.New("original error"), Stale: time.Now().Add(-time.Minute)})
@@ -286,7 +298,7 @@ func TestSwarmErrReplacesExpiredValue(t *testing.T) {
 
 	var wg sync.WaitGroup
 	var invoked uint64
-	swr, err := NewSwarm(&Config{Lookup: func(_ string) (interface{}, error) {
+	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		time.Sleep(5 * time.Millisecond)
 		atomic.AddUint64(&invoked, 1)
 		wg.Done()
@@ -295,6 +307,7 @@ func TestSwarmErrReplacesExpiredValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value is already stale, but will expire during the fetch
 	swr.Store("hit", &TimedValue{Value: nil, Err: errors.New("original error"), Stale: time.Now().Add(-time.Hour), Expiry: time.Now().Add(5 * time.Millisecond)})
