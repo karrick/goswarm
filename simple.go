@@ -295,30 +295,28 @@ func (s *Simple) run() {
 
 // Range invokes specified callback function for each non-expired key in the data map. Each
 // key-value pair is independently locked until the callback function invoked with the specified key
-// returns. The callback function is called asynchronously while searching for key-value pairs, but
-// this method does not return until all callback functions have returned.
+// returns. This method does not block access to the Simple instance, allowing keys to be added and
+// removed like normal even while the callbacks are running.
 func (s *Simple) Range(callback func(key string, value *TimedValue)) {
-	s.lock.Lock()
-	now := time.Now()
-
-	var keyCallbacker sync.WaitGroup
-	var keyChecker sync.WaitGroup
-	keyChecker.Add(len(s.data))
+	// Need to have read lock while enumerating key-value pairs from map
+	s.lock.RLock()
 	for key, ltv := range s.data {
-		// NOTE: We do not desire to block on collecting expired keys because one key takes
-		// too long to acquire its lock.
-		go func(key string, ltv *lockingTimedValue) {
-			ltv.lock.Lock()
-			if ltv.tv != nil && (ltv.tv.Expiry.IsZero() || ltv.tv.Expiry.After(now)) {
-				keyCallbacker.Add(1)
-				callback(key, ltv.tv)
-				keyCallbacker.Done()
-			}
-			ltv.lock.Unlock()
-			keyChecker.Done()
-		}(key, ltv)
+		// Now that we have a key-value pair from the map, we can release its lock to
+		// prevent blocking other routines that need it. But we do need to acquire element
+		// level lock to allow use of the key-value pair.
+		s.lock.RUnlock()
+		ltv.lock.Lock()
+
+		// The element is ours. If it's a valid value, and not yet expired, invoke the
+		// user's callback with the key and value.
+		if ltv.tv != nil && (ltv.tv.Expiry.IsZero() || ltv.tv.Expiry.After(time.Now())) {
+			callback(key, ltv.tv)
+		}
+
+		// After callback is done with element, release its lock and re-acquire map-level
+		// lock before we grab the next key-value pair from the map.
+		ltv.lock.Unlock()
+		s.lock.RLock()
 	}
-	keyChecker.Wait()
-	s.lock.Unlock()
-	keyCallbacker.Wait()
+	s.lock.RUnlock()
 }

@@ -2,6 +2,8 @@ package goswarm
 
 import (
 	"errors"
+	"math/rand"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -327,9 +329,7 @@ func TestSimpleErrReplacesExpiredValue(t *testing.T) {
 }
 
 func TestSimpleRange(t *testing.T) {
-	swr, err := NewSimple(&Config{
-		Lookup: func(_ string) (interface{}, error) { return nil, errors.New("don't care") },
-	})
+	swr, err := NewSimple(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,11 +340,9 @@ func TestSimpleRange(t *testing.T) {
 	swr.Store("expired value", TimedValue{Value: "expired value", Expiry: time.Now().Add(-time.Minute)})
 
 	called := make(map[string]struct{})
-	var calledLock sync.Mutex
 	swr.Range(func(key string, value *TimedValue) {
-		calledLock.Lock()
 		called[key] = struct{}{}
-		calledLock.Unlock()
+		swr.Store(strconv.Itoa(rand.Intn(50)), "make sure we can invoke methods that require locking")
 	})
 
 	if _, ok := called["no expiry"]; !ok {
@@ -356,4 +354,6 @@ func TestSimpleRange(t *testing.T) {
 	if _, ok := called["expired value"]; ok {
 		t.Errorf("Actual: %#v; Expected: %#v", ok, false)
 	}
+
+	swr.Store("ensure range released top level lock", struct{}{})
 }
