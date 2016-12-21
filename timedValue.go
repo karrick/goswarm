@@ -5,21 +5,26 @@ import (
 	"time"
 )
 
-// lockingTimedValue is a pointer to a value and the lock that protects it. All access to the TimedValue
-// ought to be protected by use of the lock.
-type lockingTimedValue struct {
-	lock sync.Mutex  // *all* access to this structure requires holding this lock
-	tv   *TimedValue // nil when value fetch not yet complete
-}
-
-// TimedValue couples a value with both a stale and expiry times for the value. The time.Time zero
-// value for stale implies the value never stales. The time.Time zero value for expiry implies the
-// value never expires. Neither, either, and both of these may be set to the zero value or an actual
-// time value.
+// TimedValue couples a value or the error with both a stale and expiry time for the value and
+// error.
 type TimedValue struct {
-	Value  interface{}
-	Err    error
-	Stale  time.Time
+	// Value stores the datum returned by the lookup function.
+	Value interface{}
+
+	// Err stores the error returned by the lookup function.
+	Err error
+
+	// Stale stores the time at which the value becomes stale. On Query, a stale value will
+	// trigger an asynchronous lookup of a replacement value, and the original value is
+	// returned. A zero-value for Stale implies the value never goes stale, and querying the key
+	// associated for this value will never trigger an asynchronous lookup of a replacement
+	// value.
+	Stale time.Time
+
+	// Expiry stores the time at which the value expires. On Query, an expired value will block
+	// until a synchronous lookup of a replacement value is attempted. Once the lookup returns,
+	// the Query method will return with the new value or the error returned by the lookup
+	// function.
 	Expiry time.Time
 }
 
@@ -44,4 +49,11 @@ func newTimedValue(value interface{}, err error, staleDuration, expiryDuration t
 		}
 		return &TimedValue{Value: value, Err: err, Stale: stale, Expiry: expiry}
 	}
+}
+
+// lockingTimedValue is a pointer to a value and the lock that protects it. All access to the
+// embedded TimedValue ought to be protected by use of the lock.
+type lockingTimedValue struct {
+	lock sync.Mutex  // *all* access to this structure requires holding this lock
+	tv   *TimedValue // nil when value fetch not yet complete
 }
