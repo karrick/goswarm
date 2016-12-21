@@ -292,3 +292,33 @@ func (s *Simple) run() {
 		}
 	}
 }
+
+// Range invokes specified callback function for each non-expired key in the data map. Each
+// key-value pair is independently locked until the callback function invoked with the specified key
+// returns. The callback function is called asynchronously while searching for key-value pairs, but
+// this method does not return until all callback functions have returned.
+func (s *Simple) Range(callback func(key string, value *TimedValue)) {
+	s.lock.Lock()
+	now := time.Now()
+
+	var keyCallbacker sync.WaitGroup
+	var keyChecker sync.WaitGroup
+	keyChecker.Add(len(s.data))
+	for key, ltv := range s.data {
+		// NOTE: We do not desire to block on collecting expired keys because one key takes
+		// too long to acquire its lock.
+		go func(key string, ltv *lockingTimedValue) {
+			ltv.lock.Lock()
+			if ltv.tv != nil && (ltv.tv.Expiry.IsZero() || ltv.tv.Expiry.After(now)) {
+				keyCallbacker.Add(1)
+				callback(key, ltv.tv)
+				keyCallbacker.Done()
+			}
+			ltv.lock.Unlock()
+			keyChecker.Done()
+		}(key, ltv)
+	}
+	keyChecker.Wait()
+	s.lock.Unlock()
+	keyCallbacker.Wait()
+}

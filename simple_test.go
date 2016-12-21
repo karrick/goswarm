@@ -325,3 +325,35 @@ func TestSimpleErrReplacesExpiredValue(t *testing.T) {
 		t.Errorf("Actual: %d; Expected: %d", actual, expected)
 	}
 }
+
+func TestSimpleRange(t *testing.T) {
+	swr, err := NewSimple(&Config{
+		Lookup: func(_ string) (interface{}, error) { return nil, errors.New("don't care") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = swr.Close() }()
+
+	swr.Store("no expiry", "shall not expire")
+	swr.Store("stale value", TimedValue{Value: "stale value", Stale: time.Now().Add(-time.Minute)})
+	swr.Store("expired value", TimedValue{Value: "expired value", Expiry: time.Now().Add(-time.Minute)})
+
+	called := make(map[string]struct{})
+	var calledLock sync.Mutex
+	swr.Range(func(key string, value *TimedValue) {
+		calledLock.Lock()
+		called[key] = struct{}{}
+		calledLock.Unlock()
+	})
+
+	if _, ok := called["no expiry"]; !ok {
+		t.Errorf("Actual: %#v; Expected: %#v", ok, true)
+	}
+	if _, ok := called["stale value"]; !ok {
+		t.Errorf("Actual: %#v; Expected: %#v", ok, true)
+	}
+	if _, ok := called["expired value"]; ok {
+		t.Errorf("Actual: %#v; Expected: %#v", ok, false)
+	}
+}
