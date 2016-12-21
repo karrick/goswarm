@@ -8,12 +8,11 @@ import (
 )
 
 // Simple memoizes responses from a Querier, providing very low-level time-based control of how
-// values go stale or expire. When new values are stored in the Simple instance, if they are
-// TimedValue (or a pointer to a TimedValue) items the existing Stale and Expiry values are used for
-// the newly inserted value. If the new value is not a TimedValue struct or pointer to a TimedValue
-// struct, then the Simple instance wraps the value in a TimedValue struct, and adds the Simple
-// instance's stale and expiry durations to the current time and stores the resultant TimedValue
-// struct.
+// values go stale or expire. When a new value is stored in the Simple instance, if it is a
+// TimedValue item--or a pointer to a TimedValue item)--the data map will use the provided Stale and
+// Expiry values. If the new value is not a TimedValue instance or pointer to a TimedValue instance,
+// then the Simple instance wraps the value in a TimedValue struct, and adds the Simple instance's
+// stale and expiry durations to the current time and stores the resultant TimedValue instance.
 type Simple struct {
 	config *Config
 	data   map[string]*lockingTimedValue
@@ -130,10 +129,11 @@ func (s *Simple) asynchronousFetch(key string, ltv *lockingTimedValue) {
 	// different routine, and we can return it without another fetch.
 	now := time.Now()
 
-	if !ltv.tv.Expiry.IsZero() && now.After(ltv.tv.Expiry) {
+	if ltv.tv == nil {
 		s.fetch(key, ltv)
-	}
-	if !ltv.tv.Stale.IsZero() && now.After(ltv.tv.Stale) {
+	} else if !ltv.tv.Expiry.IsZero() && now.After(ltv.tv.Expiry) {
+		s.fetch(key, ltv)
+	} else if !ltv.tv.Stale.IsZero() && now.After(ltv.tv.Stale) {
 		s.fetch(key, ltv)
 	}
 
@@ -188,6 +188,10 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 
 	ltv.lock.Lock()
 	defer ltv.lock.Unlock()
+	if ltv.tv == nil {
+		// value recently erased while waiting for lock
+		return nil, false
+	}
 	return ltv.tv.Value, true
 }
 
