@@ -42,7 +42,6 @@ type Simple struct {
 //    }
 //    defer func() { _ = simple.Close() }()
 func NewSimple(config *Config) (*Simple, error) {
-
 	if config == nil {
 		config = &Config{}
 	}
@@ -67,11 +66,11 @@ func NewSimple(config *Config) (*Simple, error) {
 	if config.BadStaleDuration > 0 && config.BadExpiryDuration > 0 && config.BadStaleDuration >= config.BadExpiryDuration {
 		return nil, fmt.Errorf("cannot create Swarm with bad stale duration not less than bad expiry duration: %v; %v", config.BadStaleDuration, config.BadExpiryDuration)
 	}
-	if config.Lookup == nil {
-		return nil, errors.New("cannot create Swarm without defined lookup")
-	}
 	if config.GCPeriodicity < 0 {
 		return nil, fmt.Errorf("cannot create Swarm with negative GCPeriodicity duration: %v", config.GCPeriodicity)
+	}
+	if config.Lookup == nil {
+		config.Lookup = func(_ string) (interface{}, error) { return nil, errors.New("no lookup defined") }
 	}
 	s := &Simple{
 		config: config,

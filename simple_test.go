@@ -51,7 +51,7 @@ func ensureValue(t *testing.T, swr *Simple, key string, expectedValue uint64) {
 
 ////////////////////////////////////////
 
-func TestSwarmSynchronousLookupWhenMiss(t *testing.T) {
+func TestSimpleSynchronousLookupWhenMiss(t *testing.T) {
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
@@ -69,7 +69,7 @@ func TestSwarmSynchronousLookupWhenMiss(t *testing.T) {
 	}
 }
 
-func TestSwarmNoStaleNoExpireNoLookupWhenHit(t *testing.T) {
+func TestSimpleNoStaleNoExpireNoLookupWhenHit(t *testing.T) {
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		t.Fatal("lookup ought not to have been invoked")
 		return nil, errors.New("lookup ought not to have been invoked")
@@ -84,7 +84,7 @@ func TestSwarmNoStaleNoExpireNoLookupWhenHit(t *testing.T) {
 	ensureValue(t, swr, "hit", 13)
 }
 
-func TestSwarmNoStaleExpireNoLookupWhenBeforeExpire(t *testing.T) {
+func TestSimpleNoStaleExpireNoLookupWhenBeforeExpire(t *testing.T) {
 	swr, err := NewSimple(&Config{
 		Lookup: func(_ string) (interface{}, error) {
 			t.Fatal("lookup ought not to have been invoked")
@@ -101,7 +101,7 @@ func TestSwarmNoStaleExpireNoLookupWhenBeforeExpire(t *testing.T) {
 	ensureValue(t, swr, "hit", 13)
 }
 
-func TestSwarmNoStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
+func TestSimpleNoStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
@@ -122,7 +122,7 @@ func TestSwarmNoStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	}
 }
 
-func TestSwarmStaleNoExpireNoLookupWhenBeforeStale(t *testing.T) {
+func TestSimpleStaleNoExpireNoLookupWhenBeforeStale(t *testing.T) {
 	swr, err := NewSimple(&Config{
 		Lookup: func(_ string) (interface{}, error) {
 			t.Fatal("lookup ought not to have been invoked")
@@ -139,7 +139,7 @@ func TestSwarmStaleNoExpireNoLookupWhenBeforeStale(t *testing.T) {
 	ensureValue(t, swr, "hit", 13)
 }
 
-func TestSwarmStaleNoExpireSynchronousLookupOnlyOnceWhenAfterStale(t *testing.T) {
+func TestSimpleStaleNoExpireSynchronousLookupOnlyOnceWhenAfterStale(t *testing.T) {
 	var wg sync.WaitGroup
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
@@ -170,7 +170,7 @@ func TestSwarmStaleNoExpireSynchronousLookupOnlyOnceWhenAfterStale(t *testing.T)
 	}
 }
 
-func TestSwarmStaleExpireNoLookupWhenBeforeStale(t *testing.T) {
+func TestSimpleStaleExpireNoLookupWhenBeforeStale(t *testing.T) {
 	swr, err := NewSimple(&Config{
 		Lookup: func(_ string) (interface{}, error) {
 			t.Fatal("lookup ought not to have been invoked")
@@ -187,7 +187,7 @@ func TestSwarmStaleExpireNoLookupWhenBeforeStale(t *testing.T) {
 	ensureValue(t, swr, "hit", 13)
 }
 
-func TestSwarmStaleExpireSynchronousLookupWhenAfterStaleAndBeforeExpire(t *testing.T) {
+func TestSimpleStaleExpireSynchronousLookupWhenAfterStaleAndBeforeExpire(t *testing.T) {
 	var wg sync.WaitGroup
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
@@ -217,7 +217,7 @@ func TestSwarmStaleExpireSynchronousLookupWhenAfterStaleAndBeforeExpire(t *testi
 	}
 }
 
-func TestSwarmStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
+func TestSimpleStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
 		atomic.AddUint64(&invoked, 1)
@@ -238,7 +238,7 @@ func TestSwarmStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	}
 }
 
-func TestSwarmErrDoesNotReplaceStaleValue(t *testing.T) {
+func TestSimpleErrDoesNotReplaceStaleValue(t *testing.T) {
 	var wg sync.WaitGroup
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
@@ -269,7 +269,7 @@ func TestSwarmErrDoesNotReplaceStaleValue(t *testing.T) {
 	}
 }
 
-func TestSwarmNewErrReplacesOldError(t *testing.T) {
+func TestSimpleNewErrReplacesOldError(t *testing.T) {
 	var wg sync.WaitGroup
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
@@ -293,9 +293,8 @@ func TestSwarmNewErrReplacesOldError(t *testing.T) {
 	}
 }
 
-func TestSwarmErrReplacesExpiredValue(t *testing.T) {
+func TestSimpleErrReplacesExpiredValue(t *testing.T) {
 	// make stale value, but fetch duration ought cause it to expire
-
 	var wg sync.WaitGroup
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
