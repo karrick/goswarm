@@ -182,6 +182,7 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 // new value is triggered, then the new value is stored and returned.
 func (s *Simple) Query(key string) (interface{}, error) {
 	ltv := s.getOrCreateLockingTimedValue(key)
+	// log.Printf("Query: waiting for ltv.lock: %q", key)
 	ltv.lock.Lock()
 	defer ltv.lock.Unlock()
 
@@ -193,31 +194,11 @@ func (s *Simple) Query(key string) (interface{}, error) {
 
 	now := time.Now()
 
-	// // NOTE: When value is an error, we want to reverse handling of zero time checks: a
-	// // zero expiry time does not imply no expiry, but rather already expired. Similarly,
-	// // a zero stale time does not imply no stale, but rather already stale.
-	// if ltv.tv.Err != nil {
-	// 	if ltv.tv.Expiry.IsZero() || now.After(ltv.tv.Expiry) {
-	// 		s.fetch(key, ltv) // synchronous fetch
-	// 	} else if ltv.tv.Stale.IsZero() || now.After(ltv.tv.Stale) {
-	// 		// NOTE: following immediately blocks until this method's deferred unlock executes
-	// 		go s.lockAndFetch(key, ltv)
-	// 	}
-	// 	return ltv.tv.Value, ltv.tv.Err
-	// }
-
-	// // NOTE: When value is not an error, a zero expiry time means it never expires and a zero
-	// // stale time means the value does not get stale.
-	// if !ltv.tv.Expiry.IsZero() && now.After(ltv.tv.Expiry) {
-	// 	s.fetch(key, ltv) // synchronous fetch
-	// } else if !ltv.tv.Stale.IsZero() && now.After(ltv.tv.Stale) {
-	// 	// NOTE: following immediately blocks until this method's deferred unlock executes
-	// 	go s.lockAndFetch(key, ltv)
-	// }
-
 	if ltv.tv.isExpired(now) {
+		// log.Printf("value expired for: %q", key)
 		s.fetch(key, ltv)
 	} else if ltv.tv.isStale(now) {
+		// log.Printf("value stale for: %q", key)
 		go s.lockAndFetch(key, ltv)
 	}
 
@@ -263,7 +244,9 @@ func (s *Simple) Store(key string, value interface{}) {
 ////////////////////////////////////////
 
 func (s *Simple) lockAndFetch(key string, ltv *lockingTimedValue) {
+	// log.Printf("lockAndFetch: waiting on lock for: %q", key)
 	ltv.lock.Lock()
+	// log.Printf("lockAndFetch: have lock for: %q", key)
 
 	// NOTE: By the time lock acquired, value might be replaced already, or even might be
 	// expired. If the value is neither expired nor stale, it must have been updated by
