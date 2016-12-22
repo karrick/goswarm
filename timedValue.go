@@ -28,6 +28,40 @@ type TimedValue struct {
 	Expiry time.Time
 }
 
+// IsExpired returns true if and only if value is expired. A value is expired when its non-zero
+// expiry time is before the current time, or when the value represents an error and expiry time is
+// the time.Time zero-value.
+func (tv *TimedValue) IsExpired() bool {
+	return tv.isExpired(time.Now())
+}
+
+// provided for internal use so we don't need to repeatedly get the current time
+func (tv *TimedValue) isExpired(when time.Time) bool {
+	if tv.Err == nil {
+		return !tv.Expiry.IsZero() && when.After(tv.Expiry)
+	}
+	// NOTE: When a TimedValue stores an error result, then Expiry and Expiry zero-values imply
+	// the value is immediately expired.
+	return tv.Expiry.IsZero() || when.After(tv.Expiry)
+}
+
+// IsStale returns true if and only if value is stale. A value is stale when its non-zero stale time
+// is before the current time, or when the value represents an error and stale time is the time.Time
+// zero-value.
+func (tv *TimedValue) IsStale() bool {
+	return tv.isStale(time.Now())
+}
+
+// provided for internal use so we don't need to repeatedly get the current time
+func (tv *TimedValue) isStale(when time.Time) bool {
+	if tv.Err == nil {
+		return !tv.Stale.IsZero() && when.After(tv.Stale)
+	}
+	// NOTE: When a TimedValue stores an error result, then Stale and Expiry zero-values imply
+	// the value is immediately stale.
+	return tv.Stale.IsZero() || when.After(tv.Stale)
+}
+
 // helper function to wrap non TimedValue items as TimedValue items.
 func newTimedValue(value interface{}, err error, staleDuration, expiryDuration time.Duration) *TimedValue {
 	switch val := value.(type) {

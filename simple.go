@@ -136,7 +136,7 @@ func (s *Simple) GC() {
 		go func(key string, ltv *lockingTimedValue) {
 			var addIt bool // NOTE: use flag rather than blocking send to channel
 			ltv.lock.Lock()
-			if ltv.tv != nil && !ltv.tv.Expiry.IsZero() && now.After(ltv.tv.Expiry) {
+			if ltv.tv != nil && ltv.tv.isExpired(now) {
 				addIt = true
 			}
 			ltv.lock.Unlock()
@@ -193,27 +193,34 @@ func (s *Simple) Query(key string) (interface{}, error) {
 
 	now := time.Now()
 
-	// NOTE: When value is an error, we want to reverse handling of zero time checks: a
-	// zero expiry time does not imply no expiry, but rather already expired. Similarly,
-	// a zero stale time does not imply no stale, but rather already stale.
-	if ltv.tv.Err != nil {
-		if ltv.tv.Expiry.IsZero() || now.After(ltv.tv.Expiry) {
-			s.fetch(key, ltv) // synchronous fetch
-		} else if ltv.tv.Stale.IsZero() || now.After(ltv.tv.Stale) {
-			// NOTE: following immediately blocks until this method's deferred unlock executes
-			go s.lockAndFetch(key, ltv)
-		}
-		return ltv.tv.Value, ltv.tv.Err
-	}
+	// // NOTE: When value is an error, we want to reverse handling of zero time checks: a
+	// // zero expiry time does not imply no expiry, but rather already expired. Similarly,
+	// // a zero stale time does not imply no stale, but rather already stale.
+	// if ltv.tv.Err != nil {
+	// 	if ltv.tv.Expiry.IsZero() || now.After(ltv.tv.Expiry) {
+	// 		s.fetch(key, ltv) // synchronous fetch
+	// 	} else if ltv.tv.Stale.IsZero() || now.After(ltv.tv.Stale) {
+	// 		// NOTE: following immediately blocks until this method's deferred unlock executes
+	// 		go s.lockAndFetch(key, ltv)
+	// 	}
+	// 	return ltv.tv.Value, ltv.tv.Err
+	// }
 
-	// NOTE: When value is not an error, a zero expiry time means it never expires and a zero
-	// stale time means the value does not get stale.
-	if !ltv.tv.Expiry.IsZero() && now.After(ltv.tv.Expiry) {
-		s.fetch(key, ltv) // synchronous fetch
-	} else if !ltv.tv.Stale.IsZero() && now.After(ltv.tv.Stale) {
-		// NOTE: following immediately blocks until this method's deferred unlock executes
+	// // NOTE: When value is not an error, a zero expiry time means it never expires and a zero
+	// // stale time means the value does not get stale.
+	// if !ltv.tv.Expiry.IsZero() && now.After(ltv.tv.Expiry) {
+	// 	s.fetch(key, ltv) // synchronous fetch
+	// } else if !ltv.tv.Stale.IsZero() && now.After(ltv.tv.Stale) {
+	// 	// NOTE: following immediately blocks until this method's deferred unlock executes
+	// 	go s.lockAndFetch(key, ltv)
+	// }
+
+	if ltv.tv.isExpired(now) {
+		s.fetch(key, ltv)
+	} else if ltv.tv.isStale(now) {
 		go s.lockAndFetch(key, ltv)
 	}
+
 	return ltv.tv.Value, ltv.tv.Err
 }
 
@@ -233,7 +240,7 @@ func (s *Simple) Range(callback func(key string, value *TimedValue)) {
 
 		// The element is ours. If it's a valid value, and not yet expired, invoke the
 		// user's callback with the key and value.
-		if ltv.tv != nil && (ltv.tv.Expiry.IsZero() || ltv.tv.Expiry.After(time.Now())) {
+		if ltv.tv != nil && !ltv.tv.IsExpired() {
 			callback(key, ltv.tv)
 		}
 
@@ -251,11 +258,6 @@ func (s *Simple) Store(key string, value interface{}) {
 	ltv.lock.Lock()
 	ltv.tv = newTimedValue(value, nil, s.config.GoodStaleDuration, s.config.GoodExpiryDuration)
 	ltv.lock.Unlock()
-}
-
-func (s *Simple) AsynchronousFetch(key string) {
-	ltv := s.getOrCreateLockingTimedValue(key)
-	s.lockAndFetch(key, ltv)
 }
 
 ////////////////////////////////////////
@@ -305,7 +307,7 @@ func (s *Simple) fetch(key string, ltv *lockingTimedValue) {
 
 	// NOTE: received error this time, but still have old value, and we only replace a good
 	// value with an error if the good value has expired
-	if !ltv.tv.Expiry.IsZero() && time.Now().After(ltv.tv.Expiry) {
+	if ltv.tv.IsExpired() {
 		ltv.tv = newTimedValue(value, err, staleDuration, expiryDuration)
 	}
 }
