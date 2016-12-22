@@ -357,3 +357,16 @@ func TestSimpleRange(t *testing.T) {
 
 	swr.Store("ensure range released top level lock", struct{}{})
 }
+
+func TestSimpleGCPeriodicity(t *testing.T) {
+	swr, err := NewSimple(&Config{
+		GCPeriodicity: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(15 * time.Millisecond)
+	if actual, expected := swr.Close(), error(nil); actual != expected {
+		t.Errorf("Actual: %d; Expected: %d", actual, expected)
+	}
+}
