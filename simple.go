@@ -112,6 +112,17 @@ func (s *Simple) Delete(key string) {
 	s.lock.Unlock()
 }
 
+// EnqueueAsyncUpdate enqueues an asynchronous request to update the value associated with the
+// specified key.
+func (s *Simple) EnqueueAsyncUpdate(key string) {
+	go func() {
+		ltv := s.getOrCreateLockingTimedValue(key)
+		ltv.lock.Lock()
+		s.update(key, ltv)
+		ltv.lock.Unlock()
+	}()
+}
+
 // GC examines all key value pairs in the Simple swarm and deletes those whose values have expired.
 func (s *Simple) GC() {
 	keys := make(chan string, len(s.data))
@@ -131,8 +142,8 @@ func (s *Simple) GC() {
 	var keyChecker sync.WaitGroup
 	keyChecker.Add(len(s.data))
 	for key, ltv := range s.data {
-		// NOTE: We do not desire to block on collecting expired keys because one key takes
-		// too long to acquire its lock.
+		// Create asynchronous routine to collect each key individually so task doesn't
+		// block waiting for any of the locks.
 		go func(key string, ltv *lockingTimedValue) {
 			var addIt bool // NOTE: use flag rather than blocking send to channel
 			ltv.lock.Lock()
@@ -156,7 +167,7 @@ func (s *Simple) GC() {
 // indicating whether or not the key was found in the map.
 func (s *Simple) Load(key string) (interface{}, bool) {
 	// Do not want to use getOrCreateLockingTimeValue, because there's no reason to create LTV
-	// if key is to be deleted.
+	// if key is not present in data map.
 	s.lock.RLock()
 	ltv, ok := s.data[key]
 	s.lock.RUnlock()
@@ -188,7 +199,7 @@ func (s *Simple) Query(key string) (interface{}, error) {
 
 	// NOTE: check whether value filled while waiting for lock above
 	if ltv.tv == nil {
-		s.fetch(key, ltv)
+		s.update(key, ltv)
 		return ltv.tv.Value, ltv.tv.Err
 	}
 
@@ -196,10 +207,10 @@ func (s *Simple) Query(key string) (interface{}, error) {
 
 	if ltv.tv.isExpired(now) {
 		// log.Printf("value expired for: %q", key)
-		s.fetch(key, ltv)
+		s.update(key, ltv)
 	} else if ltv.tv.isStale(now) {
 		// log.Printf("value stale for: %q", key)
-		go s.lockAndFetch(key, ltv)
+		go s.lockAndUpdate(key, ltv)
 	}
 
 	return ltv.tv.Value, ltv.tv.Err
@@ -243,7 +254,24 @@ func (s *Simple) Store(key string, value interface{}) {
 
 ////////////////////////////////////////
 
-func (s *Simple) lockAndFetch(key string, ltv *lockingTimedValue) {
+func (s *Simple) getOrCreateLockingTimedValue(key string) *lockingTimedValue {
+	s.lock.RLock()
+	ltv, ok := s.data[key]
+	s.lock.RUnlock()
+	if !ok {
+		s.lock.Lock()
+		// check whether value filled while waiting for lock above
+		ltv, ok = s.data[key]
+		if !ok {
+			ltv = &lockingTimedValue{}
+			s.data[key] = ltv
+		}
+		s.lock.Unlock()
+	}
+	return ltv
+}
+
+func (s *Simple) lockAndUpdate(key string, ltv *lockingTimedValue) {
 	// log.Printf("lockAndFetch: waiting on lock for: %q", key)
 	ltv.lock.Lock()
 	// log.Printf("lockAndFetch: have lock for: %q", key)
@@ -254,20 +282,33 @@ func (s *Simple) lockAndFetch(key string, ltv *lockingTimedValue) {
 	now := time.Now()
 
 	if ltv.tv == nil {
-		s.fetch(key, ltv)
+		s.update(key, ltv)
 	} else if !ltv.tv.Expiry.IsZero() && now.After(ltv.tv.Expiry) {
-		s.fetch(key, ltv)
+		s.update(key, ltv)
 	} else if !ltv.tv.Stale.IsZero() && now.After(ltv.tv.Stale) {
-		s.fetch(key, ltv)
+		s.update(key, ltv)
 	}
 
 	ltv.lock.Unlock()
 }
 
-// Fetch method attempts to fetch a new value for the specified key. If the fetch is successful, it
-// stores the value in the lockingTimedValue associated with the key. WARNING: It is *imperative*
-// that the element lock is acquired around a call to this method.
-func (s *Simple) fetch(key string, ltv *lockingTimedValue) {
+func (s *Simple) run() {
+	for {
+		select {
+		case <-time.After(s.config.GCPeriodicity):
+			s.GC()
+		case <-s.halt:
+			s.closeError <- nil
+			// there is no cleanup required, so we just return
+			return
+		}
+	}
+}
+
+// The update method attempts to update a new value for the specified key. If the update is
+// successful, it stores the value in the lockingTimedValue associated with the key. WARNING: It is
+// *imperative* that the element lock is acquired around a call to this method.
+func (s *Simple) update(key string, ltv *lockingTimedValue) {
 	staleDuration := s.config.GoodStaleDuration
 	expiryDuration := s.config.GoodExpiryDuration
 
@@ -292,35 +333,5 @@ func (s *Simple) fetch(key string, ltv *lockingTimedValue) {
 	// value with an error if the good value has expired
 	if ltv.tv.IsExpired() {
 		ltv.tv = newTimedValue(value, err, staleDuration, expiryDuration)
-	}
-}
-
-func (s *Simple) getOrCreateLockingTimedValue(key string) *lockingTimedValue {
-	s.lock.RLock()
-	ltv, ok := s.data[key]
-	s.lock.RUnlock()
-	if !ok {
-		s.lock.Lock()
-		// check whether value filled while waiting for lock above
-		ltv, ok = s.data[key]
-		if !ok {
-			ltv = &lockingTimedValue{}
-			s.data[key] = ltv
-		}
-		s.lock.Unlock()
-	}
-	return ltv
-}
-
-func (s *Simple) run() {
-	for {
-		select {
-		case <-time.After(s.config.GCPeriodicity):
-			s.GC()
-		case <-s.halt:
-			s.closeError <- nil
-			// there is no cleanup required, so we just return
-			return
-		}
 	}
 }
