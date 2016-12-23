@@ -112,17 +112,6 @@ func (s *Simple) Delete(key string) {
 	s.lock.Unlock()
 }
 
-// EnqueueAsyncUpdate enqueues an asynchronous request to update the value associated with the
-// specified key.
-func (s *Simple) EnqueueAsyncUpdate(key string) {
-	go func() {
-		ltv := s.getOrCreateLockingTimedValue(key)
-		ltv.lock.Lock()
-		s.update(key, ltv)
-		ltv.lock.Unlock()
-	}()
-}
-
 // GC examines all key value pairs in the Simple swarm and deletes those whose values have expired.
 func (s *Simple) GC() {
 	keys := make(chan string, len(s.data))
@@ -249,6 +238,14 @@ func (s *Simple) Store(key string, value interface{}) {
 	ltv := s.getOrCreateLockingTimedValue(key)
 	ltv.lock.Lock()
 	ltv.tv = newTimedValue(value, nil, s.config.GoodStaleDuration, s.config.GoodExpiryDuration)
+	ltv.lock.Unlock()
+}
+
+// Update forces an update of the value associated with the specified key.
+func (s *Simple) Update(key string) {
+	ltv := s.getOrCreateLockingTimedValue(key)
+	ltv.lock.Lock()
+	s.update(key, ltv)
 	ltv.lock.Unlock()
 }
 
