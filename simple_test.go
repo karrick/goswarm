@@ -2,6 +2,7 @@ package goswarm
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -365,8 +366,32 @@ func TestSimpleGCPeriodicity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	now := time.Now()
+
+	// populate swr with lots of data, some expired, some stale, some good
+	const itemCount = 10000
+
+	for i := 0; i < itemCount; i++ {
+		var value interface{}
+		switch rand.Intn(4) {
+		case 0: // expired data
+			value = TimedValue{Value: "expired", Expiry: now.Add(-time.Minute)}
+		case 1: // stale data
+			value = TimedValue{Value: "stale", Stale: now.Add(-time.Minute)}
+		case 2: // future stale
+			value = TimedValue{Value: "future stale", Stale: now.Add(time.Minute)}
+		case 3: // future expiry
+			value = TimedValue{Value: "future expiry", Expiry: now.Add(time.Minute)}
+		case 4: // plain data
+			value = "good"
+		}
+		// log.Printf("value: %v", value)
+		swr.Store(fmt.Sprintf("key%d", i), value)
+	}
+
 	time.Sleep(15 * time.Millisecond)
 	if actual, expected := swr.Close(), error(nil); actual != expected {
-		t.Errorf("Actual: %d; Expected: %d", actual, expected)
+		t.Errorf("Actual: %d; Expected: %s", actual, expected)
 	}
 }

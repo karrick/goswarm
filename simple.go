@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -114,26 +115,21 @@ func (s *Simple) Delete(key string) {
 
 // GC examines all key value pairs in the Simple swarm and deletes those whose values have expired.
 func (s *Simple) GC() {
-	keys := make(chan string, len(s.data))
-
 	s.lock.Lock()
-	now := time.Now()
 
-	var keyKiller sync.WaitGroup
-	keyKiller.Add(1)
-	go func() {
-		for key := range keys {
-			delete(s.data, key)
-		}
-		keyKiller.Done()
-	}()
+	var deathRowCount int32
+
+	now := time.Now()
+	keysToDie := make(chan string, len(s.data))
 
 	var keyChecker sync.WaitGroup
 	keyChecker.Add(len(s.data))
+
 	for key, ltv := range s.data {
 		// Create asynchronous routine to collect each key individually so task doesn't
-		// block waiting for any of the locks.
+		// block waiting for any of the key locks.
 		go func(key string, ltv *lockingTimedValue) {
+			defer keyChecker.Done()
 			var addIt bool // NOTE: use flag rather than blocking send to channel
 			ltv.lock.Lock()
 			if ltv.tv != nil && ltv.tv.isExpired(now) {
@@ -141,14 +137,17 @@ func (s *Simple) GC() {
 			}
 			ltv.lock.Unlock()
 			if addIt {
-				keys <- key
+				keysToDie <- key
+				atomic.AddInt32(&deathRowCount, 1)
 			}
-			keyChecker.Done()
 		}(key, ltv)
 	}
 	keyChecker.Wait()
-	close(keys)
-	keyKiller.Wait()
+
+	for i := int32(0); i < deathRowCount; i++ {
+		delete(s.data, <-keysToDie)
+	}
+
 	s.lock.Unlock()
 }
 
