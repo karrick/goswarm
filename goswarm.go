@@ -38,4 +38,9 @@ type Config struct {
 
 	// GCPeriodicity specifies how frequently the data map purges expired entries.
 	GCPeriodicity time.Duration
+
+	// GCTimeout specifies how long the GC should wait for values to unlock.
+	GCTimeout time.Duration
 }
+
+const defaultGCTimeout = 10 * time.Second

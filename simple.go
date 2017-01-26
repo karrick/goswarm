@@ -70,6 +70,12 @@ func NewSimple(config *Config) (*Simple, error) {
 	if config.GCPeriodicity < 0 {
 		return nil, fmt.Errorf("cannot create Swarm with negative GCPeriodicity duration: %v", config.GCPeriodicity)
 	}
+	if config.GCTimeout < 0 {
+		return nil, fmt.Errorf("cannot create Swarm with negative GCTimeout duration: %v", config.GCTimeout)
+	}
+	if config.GCTimeout == 0 {
+		config.GCTimeout = defaultGCTimeout
+	}
 	if config.Lookup == nil {
 		config.Lookup = func(_ string) (interface{}, error) { return nil, errors.New("no lookup defined") }
 	}
@@ -113,42 +119,69 @@ func (s *Simple) Delete(key string) {
 	s.lock.Unlock()
 }
 
+type gcPair struct {
+	key    string
+	doomed bool
+}
+
+var gcFlag int32
+
 // GC examines all key value pairs in the Simple swarm and deletes those whose values have expired.
 func (s *Simple) GC() {
-	s.lock.Lock()
+	// NOTE: bail if another GC thread running
+	if !atomic.CompareAndSwapInt32(&gcFlag, 0, 1) {
+		return
+	}
+	defer atomic.StoreInt32(&gcFlag, 0)
 
-	var deathRowCount int32
+	// Mark phase
+	s.lock.RLock()
 
+	timeoutC := time.After(s.config.GCTimeout)
 	now := time.Now()
-	keysToDie := make(chan string, len(s.data))
-
-	var keyChecker sync.WaitGroup
-	keyChecker.Add(len(s.data))
+	totalCount := len(s.data)
+	allPairs := make(chan gcPair, totalCount)
+	var traversedCount int
 
 	for key, ltv := range s.data {
-		// Create asynchronous routine to collect each key individually so task doesn't
-		// block waiting for any of the key locks.
-		go func(key string, ltv *lockingTimedValue) {
-			defer keyChecker.Done()
-			var addIt bool // NOTE: use flag rather than blocking send to channel
+		// Create asynchronous routines to collect each key individually so overall task
+		// doesn't block waiting for any of the key locks.
+		go func(key string, ltv *lockingTimedValue, allKeys chan<- gcPair) {
 			ltv.lock.Lock()
-			if ltv.tv != nil && ltv.tv.isExpired(now) {
-				addIt = true
+			defer ltv.lock.Unlock()
+			allKeys <- gcPair{
+				key:    key,
+				doomed: ltv.tv != nil && ltv.tv.isExpired(now),
 			}
-			ltv.lock.Unlock()
-			if addIt {
-				keysToDie <- key
-				atomic.AddInt32(&deathRowCount, 1)
+		}(key, ltv, allPairs)
+	}
+	s.lock.RUnlock()
+
+	var doomed []string
+loop:
+	for {
+		select {
+		case pair := <-allPairs:
+			if pair.doomed {
+				doomed = append(doomed, pair.key)
 			}
-		}(key, ltv)
+			traversedCount++
+			if traversedCount == totalCount {
+				break loop
+			}
+		case <-timeoutC:
+			break loop
+		}
 	}
-	keyChecker.Wait()
 
-	for i := int32(0); i < deathRowCount; i++ {
-		delete(s.data, <-keysToDie)
+	// Sweep phase
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	// delete em
+	for _, key := range doomed {
+		delete(s.data, key)
 	}
-
-	s.lock.Unlock()
 }
 
 // Load returns the value associated with the specified key, and a boolean value
