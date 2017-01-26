@@ -1,7 +1,6 @@
 package goswarm
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -150,12 +149,10 @@ func (s *Simple) GC() {
 	// likely that those evicted key-value pairs will be eventually collected during a future GC
 	// run.
 
-	// Although we _could_ use context.WithTimeout below, we also need to hold onto result of
-	// time.Now() so it can be used when testing whether a key-value pair ought to be evicted
-	// from the cache.
+	// Although context.WithTimeout or context.WithDeadline _could_ be used below, we do not
+	// desire to require Go 1.7 or above when a simple time.Timer channel will do the job.
 	now := time.Now()
-	ctx, cancel := context.WithDeadline(context.Background(), now.Add(s.config.GCTimeout))
-	defer cancel()
+	timeoutC := time.After(s.config.GCTimeout)
 
 	// Create a buffered channel large enough to receive all key-value pairs so that in the
 	// event of early mark phase termination due to timeout, the goroutines created below will
@@ -188,7 +185,7 @@ func (s *Simple) GC() {
 loop:
 	for {
 		select {
-		case <-ctx.Done():
+		case <-timeoutC:
 			// The above channel is closed when either the timeout has expired or when
 			// the number of received pairs equals the number of key-value pairs in the
 			// cache, done manually below by calling `cancel()`.
@@ -200,7 +197,7 @@ loop:
 			// Once all key-value pairs have been received we can terminate the
 			// collection phase.
 			if receivedCount++; receivedCount == totalCount {
-				cancel()
+				break loop
 			}
 		}
 	}
