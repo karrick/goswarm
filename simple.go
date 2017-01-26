@@ -1,6 +1,7 @@
 package goswarm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -128,57 +129,86 @@ var gcFlag int32
 
 // GC examines all key value pairs in the Simple swarm and deletes those whose values have expired.
 func (s *Simple) GC() {
-	// NOTE: bail if another GC thread running
+	// Bail if another GC thread is already running. This may happen automatically when
+	// GCPeriodicity is shorter than GCTimeout, or when user manually invokes GC method.
 	if !atomic.CompareAndSwapInt32(&gcFlag, 0, 1) {
 		return
 	}
 	defer atomic.StoreInt32(&gcFlag, 0)
 
-	// Mark phase
+	// MARK PHASE
 	s.lock.RLock()
 
-	timeoutC := time.After(s.config.GCTimeout)
+	// Create asynchronous goroutines to collect each key/value pair individually, so overall
+	// mark phase task does not block waiting for any of the key locks.  We use a channel to
+	// collect key/value pair results in order to serialize the parallel collection of pairs.
+
+	// Ultimately, however, we do not desire to spend more than a specified duration of time
+	// collecting key/value pairs during the mark phase, so a context is created with a deadline
+	// to allow for early termination of the mark phase. This logic does allow some key/value
+	// pairs to remain expired after their eviction time, but with a long enough GCTimeout it is
+	// likely that those evicted key/value pairs will be eventually collected during a future
+	// GC run.
+
+	// Although we _could_ use context.WithTimeout below, we also need to hold onto result of
+	// time.Now() so it can be used when testing whether a key/value pair ought to be evicted
+	// from the cache.
 	now := time.Now()
+	ctx, cancel := context.WithDeadline(context.Background(), now.Add(s.config.GCTimeout))
+	defer cancel()
+
+	// Create a buffered channel large enough to receive all key/value pairs so that in the
+	// event of early mark phase termination due to timeout, the goroutines created below will
+	// not block on sending to a full channel that is no longer consumed after mark phase has
+	// ended.
 	totalCount := len(s.data)
 	allPairs := make(chan gcPair, totalCount)
-	var traversedCount int
 
+	// Loop through all existing key/value pairs in the cache, creating goroutines for each pair
+	// to individually wait for the respective key lock, test the eviction logic, and send the
+	// result to the results channel.
 	for key, ltv := range s.data {
-		// Create asynchronous routines to collect each key individually so overall task
-		// doesn't block waiting for any of the key locks.
-		go func(key string, ltv *lockingTimedValue, allKeys chan<- gcPair) {
+		go func(key string, ltv *lockingTimedValue, allPairs chan<- gcPair) {
 			ltv.lock.Lock()
 			defer ltv.lock.Unlock()
-			allKeys <- gcPair{
+			allPairs <- gcPair{
 				key:    key,
 				doomed: ltv.tv != nil && ltv.tv.isExpired(now),
 			}
 		}(key, ltv, allPairs)
 	}
+
+	// After looping through all key/value pairs, we no longer need to hold the read lock for
+	// the cache while waiting for the results to arrive.
 	s.lock.RUnlock()
 
+	// COLLECT PHASE: Spawn goroutine to collect locked key/value pairs.
 	var doomed []string
+	var receivedCount int
 loop:
 	for {
 		select {
+		case <-ctx.Done():
+			// The above channel is closed when either the timeout has expired or when
+			// the number of received pairs equals the number of key/value pairs in the
+			// cache, done manually below by calling `cancel()`.
+			break loop
 		case pair := <-allPairs:
 			if pair.doomed {
 				doomed = append(doomed, pair.key)
 			}
-			traversedCount++
-			if traversedCount == totalCount {
-				break loop
+			// Once all key/value pairs have been received we can terminate the
+			// collection phase.
+			if receivedCount++; receivedCount == totalCount {
+				cancel()
 			}
-		case <-timeoutC:
-			break loop
 		}
 	}
 
-	// Sweep phase
+	// SWEEP PHASE: Grab the write lock and delete all doomed key/value pairs from the cache.
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// delete em
 	for _, key := range doomed {
 		delete(s.data, key)
 	}
