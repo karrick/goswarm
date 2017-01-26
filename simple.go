@@ -139,32 +139,32 @@ func (s *Simple) GC() {
 	// MARK PHASE
 	s.lock.RLock()
 
-	// Create asynchronous goroutines to collect each key/value pair individually, so overall
+	// Create asynchronous goroutines to collect each key-value pair individually, so overall
 	// mark phase task does not block waiting for any of the key locks.  We use a channel to
-	// collect key/value pair results in order to serialize the parallel collection of pairs.
+	// collect key-value pair results in order to serialize the parallel collection of pairs.
 
 	// Ultimately, however, we do not desire to spend more than a specified duration of time
-	// collecting key/value pairs during the mark phase, so a context is created with a deadline
-	// to allow for early termination of the mark phase. This logic does allow some key/value
+	// collecting key-value pairs during the mark phase, so a context is created with a deadline
+	// to allow for early termination of the mark phase. This logic does allow some key-value
 	// pairs to remain expired after their eviction time, but with a long enough GCTimeout it is
-	// likely that those evicted key/value pairs will be eventually collected during a future
-	// GC run.
+	// likely that those evicted key-value pairs will be eventually collected during a future GC
+	// run.
 
 	// Although we _could_ use context.WithTimeout below, we also need to hold onto result of
-	// time.Now() so it can be used when testing whether a key/value pair ought to be evicted
+	// time.Now() so it can be used when testing whether a key-value pair ought to be evicted
 	// from the cache.
 	now := time.Now()
 	ctx, cancel := context.WithDeadline(context.Background(), now.Add(s.config.GCTimeout))
 	defer cancel()
 
-	// Create a buffered channel large enough to receive all key/value pairs so that in the
+	// Create a buffered channel large enough to receive all key-value pairs so that in the
 	// event of early mark phase termination due to timeout, the goroutines created below will
 	// not block on sending to a full channel that is no longer consumed after mark phase has
 	// ended.
 	totalCount := len(s.data)
 	allPairs := make(chan gcPair, totalCount)
 
-	// Loop through all existing key/value pairs in the cache, creating goroutines for each pair
+	// Loop through all existing key-value pairs in the cache, creating goroutines for each pair
 	// to individually wait for the respective key lock, test the eviction logic, and send the
 	// result to the results channel.
 	for key, ltv := range s.data {
@@ -178,11 +178,11 @@ func (s *Simple) GC() {
 		}(key, ltv, allPairs)
 	}
 
-	// After looping through all key/value pairs, we no longer need to hold the read lock for
+	// After looping through all key-value pairs, we no longer need to hold the read lock for
 	// the cache while waiting for the results to arrive.
 	s.lock.RUnlock()
 
-	// COLLECT PHASE: Spawn goroutine to collect locked key/value pairs.
+	// COLLECT PHASE: Spawn goroutine to collect locked key-value pairs.
 	var doomed []string
 	var receivedCount int
 loop:
@@ -190,14 +190,14 @@ loop:
 		select {
 		case <-ctx.Done():
 			// The above channel is closed when either the timeout has expired or when
-			// the number of received pairs equals the number of key/value pairs in the
+			// the number of received pairs equals the number of key-value pairs in the
 			// cache, done manually below by calling `cancel()`.
 			break loop
 		case pair := <-allPairs:
 			if pair.doomed {
 				doomed = append(doomed, pair.key)
 			}
-			// Once all key/value pairs have been received we can terminate the
+			// Once all key-value pairs have been received we can terminate the
 			// collection phase.
 			if receivedCount++; receivedCount == totalCount {
 				cancel()
@@ -205,7 +205,7 @@ loop:
 		}
 	}
 
-	// SWEEP PHASE: Grab the write lock and delete all doomed key/value pairs from the cache.
+	// SWEEP PHASE: Grab the write lock and delete all doomed key-value pairs from the cache.
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -214,8 +214,8 @@ loop:
 	}
 }
 
-// Load returns the value associated with the specified key, and a boolean value
-// indicating whether or not the key was found in the map.
+// Load returns the value associated with the specified key, and a boolean value indicating whether
+// or not the key was found in the map.
 func (s *Simple) Load(key string) (interface{}, bool) {
 	// Do not want to use getOrCreateLockingTimeValue, because there's no reason to create LTV
 	// if key is not present in data map.
@@ -248,7 +248,7 @@ func (s *Simple) Query(key string) (interface{}, error) {
 	ltv.lock.Lock()
 	defer ltv.lock.Unlock()
 
-	// NOTE: check whether value filled while waiting for lock above
+	// check whether value filled while waiting for lock above
 	if ltv.tv == nil {
 		s.update(key, ltv)
 		return ltv.tv.Value, ltv.tv.Err
@@ -257,10 +257,8 @@ func (s *Simple) Query(key string) (interface{}, error) {
 	now := time.Now()
 
 	if ltv.tv.isExpired(now) {
-		// log.Printf("value expired for: %q", key)
 		s.update(key, ltv)
 	} else if ltv.tv.isStale(now) {
-		// log.Printf("value stale for: %q", key)
 		go s.lockAndUpdate(key, ltv)
 	}
 
@@ -295,7 +293,7 @@ func (s *Simple) Range(callback func(key string, value *TimedValue)) {
 	s.lock.RUnlock()
 }
 
-// Store saves the key/value pair to the cache, overwriting whatever was previously stored.
+// Store saves the key-value pair to the cache, overwriting whatever was previously stored.
 func (s *Simple) Store(key string, value interface{}) {
 	ltv := s.getOrCreateLockingTimedValue(key)
 	ltv.lock.Lock()
@@ -335,16 +333,16 @@ func (s *Simple) lockAndUpdate(key string, ltv *lockingTimedValue) {
 	ltv.lock.Lock()
 	// log.Printf("lockAndFetch: have lock for: %q", key)
 
-	// NOTE: By the time lock acquired, value might be replaced already, or even might be
-	// expired. If the value is neither expired nor stale, it must have been updated by
-	// different routine, and we can return it without another fetch.
+	// By the time lock acquired, value might be replaced already, or even might be expired. If
+	// the value is neither expired nor stale, it must have been updated by different routine,
+	// and we can return it without another fetch.
 	now := time.Now()
 
 	if ltv.tv == nil {
 		s.update(key, ltv)
-	} else if !ltv.tv.Expiry.IsZero() && now.After(ltv.tv.Expiry) {
+	} else if ltv.tv.isExpired(now) {
 		s.update(key, ltv)
-	} else if !ltv.tv.Stale.IsZero() && now.After(ltv.tv.Stale) {
+	} else if ltv.tv.isStale(now) {
 		s.update(key, ltv)
 	}
 
@@ -378,18 +376,18 @@ func (s *Simple) update(key string, ltv *lockingTimedValue) {
 		return
 	}
 
-	// NOTE: lookup gave us an error
+	// lookup gave us an error
 	staleDuration = s.config.BadStaleDuration
 	expiryDuration = s.config.BadExpiryDuration
 
-	// NOTE: new error overwrites previous error, and also used when initial value
+	// new error overwrites previous error, and also used when initial value
 	if ltv.tv == nil || ltv.tv.Err != nil {
 		ltv.tv = newTimedValue(value, err, staleDuration, expiryDuration)
 		return
 	}
 
-	// NOTE: received error this time, but still have old value, and we only replace a good
-	// value with an error if the good value has expired
+	// received error this time, but still have old value, and we only replace a good value with
+	// an error if the good value has expired
 	if ltv.tv.IsExpired() {
 		ltv.tv = newTimedValue(value, err, staleDuration, expiryDuration)
 	}
