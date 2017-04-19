@@ -20,7 +20,7 @@ In addition to the examples provided below, documentation can be found at
     simple.Store("someKeyString", 42)
     simple.Store("anotherKey", struct{}{})
     simple.Store("yetAnotherKey", make(chan interface{}))
-    
+
     // but when you retrieve it, you are responsible to perform type assertions
     key := "yetAnotherKey"
     value, ok := simple.Load(key)
@@ -44,7 +44,7 @@ specified lookup function to fetch the value for that key.
 
 ```Go
     simple, err := goswarm.NewSimple(&goswarm.Config{
-		Lookup: func(key string) (interface{}, error) {
+        Lookup: func(key string) (interface{}, error) {
             // TODO: do slow calculation or make a network call
             result := key // example
             return result, nil
@@ -54,7 +54,7 @@ specified lookup function to fetch the value for that key.
         log.Fatal(err)
     }
     defer func() { _ = simple.Close() }()
-    
+
     value, err := simple.Query("%version")
     if !err {
         panic(fmt.Errorf("cannot retrieve value for key %q: %s", key, err))
@@ -95,10 +95,10 @@ invoked to stop and release that go-routine.
 
 ```Go
     simple, err := goswarm.NewSimple(&goswarm.Config{
-		GoodExpiryDuration: 24 * time.Hour,
-		BadExpiryDuration:  5 * time.Minute,
+        GoodExpiryDuration: 24 * time.Hour,
+        BadExpiryDuration:  5 * time.Minute,
         GCPeriodicity:      time.Hour,
-		Lookup:             func(key string) (interface{}, error) {
+        Lookup:             func(key string) (interface{}, error) {
             // TODO: do slow calculation or make a network call
             result := key // example
             return result, nil
@@ -123,12 +123,12 @@ faults and latencies.
 
 ```Go
     simple, err := goswarm.NewSimple(&goswarm.Config{
-		GoodStaleDuration:  time.Minute,
-		GoodExpiryDuration: 24 * time.Hour,
-		BadStaleDuration:   time.Minute,
-		BadExpiryDuration:  5 * time.Minute,
+        GoodStaleDuration:  time.Minute,
+        GoodExpiryDuration: 24 * time.Hour,
+        BadStaleDuration:   time.Minute,
+        BadExpiryDuration:  5 * time.Minute,
         GCPeriodicity:      time.Hour,
-		Lookup:             func(key string) (interface{}, error) {
+        Lookup:             func(key string) (interface{}, error) {
             // TODO: do slow calculation or make a network call
             result := key // example
             return result, nil
@@ -138,7 +138,7 @@ faults and latencies.
         log.Fatal(err)
     }
     defer func() { _ = simple.Close() }()
-    
+
     value, err := simple.Query("%version")
     if !err {
         panic(fmt.Errorf("cannot retrieve value for key %q: %s", key, err))
