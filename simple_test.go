@@ -401,6 +401,6 @@ func TestSimpleGC(t *testing.T) {
 
 	time.Sleep(25 * time.Millisecond)
 	if actual, expected := swr.Close(), error(nil); actual != expected {
-		t.Errorf("Actual: %d; Expected: %s", actual, expected)
+		t.Errorf("Actual: %s; Expected: %s", actual, expected)
 	}
 }
