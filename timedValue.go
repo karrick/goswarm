@@ -1,7 +1,7 @@
 package goswarm
 
 import (
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -85,9 +85,13 @@ func newTimedValue(value interface{}, err error, staleDuration, expiryDuration t
 	}
 }
 
-// lockingTimedValue is a pointer to a value and the lock that protects it. All access to the
-// embedded TimedValue ought to be protected by use of the lock.
-type lockingTimedValue struct {
-	lock sync.Mutex  // *all* access to this structure requires holding this lock
-	tv   *TimedValue // nil when value fetch not yet complete
+type atomicTimedValue struct {
+	// av is accessed with atomic.Value's Load() and Store() methods to
+	// atomically access the underlying *TimedValue.
+	av atomic.Value
+
+	// pending is accessed with sync/atomic primitives to control whether an
+	// asynchronous lookup ought to be spawned to update av. 1 when a go routine
+	// is waiting on Lookup return; 0 otherwise
+	pending int32
 }
