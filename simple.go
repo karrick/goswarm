@@ -20,6 +20,7 @@ type Simple struct {
 	lock       sync.RWMutex
 	halt       chan struct{}
 	closeError chan error
+	gcFlag     int32
 }
 
 // NewSimple returns Swarm that attempts to respond to Query methods by consulting its TTL cache,
@@ -124,16 +125,14 @@ type gcPair struct {
 	doomed bool
 }
 
-var gcFlag int32
-
 // GC examines all key value pairs in the Simple swarm and deletes those whose values have expired.
 func (s *Simple) GC() {
 	// Bail if another GC thread is already running. This may happen automatically when
 	// GCPeriodicity is shorter than GCTimeout, or when user manually invokes GC method.
-	if !atomic.CompareAndSwapInt32(&gcFlag, 0, 1) {
+	if !atomic.CompareAndSwapInt32(&s.gcFlag, 0, 1) {
 		return
 	}
-	defer atomic.StoreInt32(&gcFlag, 0)
+	defer atomic.StoreInt32(&s.gcFlag, 0)
 
 	// MARK PHASE
 	s.lock.RLock()
