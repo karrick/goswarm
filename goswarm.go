@@ -41,6 +41,12 @@ type Config struct {
 
 	// GCTimeout specifies how long the GC should wait for values to unlock.
 	GCTimeout time.Duration
+
+	// StoreWhenLatencyExceeds specifies the threshold for storing key-value
+	// pairs. When not the default 0 value, if a Lookup for a particular key
+	// takes longer than the specified threshold, the key-value will be stored
+	// in the cache. Otherwise it will not be stored.
+	StoreWhenLatencyExceeds time.Duration
 }
 
 const defaultGCTimeout = 10 * time.Second

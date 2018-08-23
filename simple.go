@@ -23,6 +23,19 @@ type Simple struct {
 	halt       chan struct{}
 	closeError chan error
 	gcFlag     int32
+
+	// latencyThreshold is optional parameter that, when not the default 0
+	// value, will only store a key-value pair if invocation of the Lookup took
+	// longer than the threshold.
+	latencyThreshold time.Duration
+
+	stats Stats
+}
+
+type Stats struct {
+	Count                                        uint64 // count of items in cache
+	Loads, Stores, Deletes, Evictions            uint64
+	Queries, QueryHits, QueryMisses, QueryErrors uint64
 }
 
 // NewSimple returns Swarm that attempts to respond to Query methods by
@@ -120,6 +133,7 @@ func (s *Simple) Delete(key string) {
 	// delete it.
 	s.lock.Lock()
 	delete(s.data, key)
+	s.stats.Deletes++ // do not need atomic because have exclusive lock already
 	s.lock.Unlock()
 }
 
@@ -216,6 +230,7 @@ loop:
 	s.lock.Lock()
 	for _, key := range doomed {
 		delete(s.data, key)
+		s.stats.Evictions++ // already have write lock
 	}
 	s.lock.Unlock()
 }
@@ -223,6 +238,8 @@ loop:
 // Load returns the value associated with the specified key, and a boolean value
 // indicating whether or not the key was found in the map.
 func (s *Simple) Load(key string) (interface{}, bool) {
+	atomic.AddUint64(&s.stats.Loads, 1)
+
 	// Do not want to use getOrCreateLockingTimeValue, because there's no reason
 	// to create ATV if key is not present in data map.
 	s.lock.RLock()
@@ -249,22 +266,23 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 // lookup of a new value is triggered, then the new value is stored and
 // returned.
 func (s *Simple) Query(key string) (interface{}, error) {
+	atomic.AddUint64(&s.stats.Queries, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
 	av := atv.av.Load()
 	if av == nil {
-		tv := s.update(key, atv)
+		tv := s.queryMiss(key, atv)
 		return tv.Value, tv.Err
 	} else {
 		now := time.Now()
 		tv := av.(*TimedValue)
 		if tv.isExpired(now) {
-			tv = s.update(key, atv)
+			tv = s.queryMiss(key, atv)
 		} else if tv.isStale(now) {
 			// If no other goroutine is looking up this value, spin one off
 			if atomic.CompareAndSwapInt32(&atv.pending, 0, 1) {
 				go func() {
 					defer atomic.StoreInt32(&atv.pending, 0)
-					_ = s.update(key, atv)
+					_ = s.queryMiss(key, atv)
 				}()
 			}
 		}
@@ -347,6 +365,11 @@ func (s *Simple) getOrCreateAtomicTimedValue(key string) *atomicTimedValue {
 	return atv
 }
 
+func (s *Simple) queryMiss(key string, atv *atomicTimedValue) *TimedValue {
+	atomic.AddUint64(&s.stats.QueryMisses, 1)
+	return s.update(key, atv)
+}
+
 // The update method attempts to update a new value for the specified key. If
 // the update is successful, it stores the value in the TimedValue associated
 // with the key.
@@ -360,6 +383,8 @@ func (s *Simple) update(key string, atv *atomicTimedValue) *TimedValue {
 		atv.av.Store(tv)
 		return tv
 	}
+
+	atomic.AddUint64(&s.stats.QueryErrors, 1)
 
 	// lookup gave us an error
 	staleDuration = s.config.BadStaleDuration
