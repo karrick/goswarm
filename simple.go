@@ -32,8 +32,9 @@ type Simple struct {
 	stats Stats
 }
 
+// Stats contains various statistics for cache.
 type Stats struct {
-	Count                                        uint64 // count of items in cache
+	Count                                        uint64 // Count of items in cache.
 	Loads, Stores, Deletes, Evictions            uint64
 	Queries, QueryHits, QueryMisses, QueryErrors uint64
 }
@@ -134,6 +135,7 @@ func (s *Simple) Delete(key string) {
 	s.lock.Lock()
 	delete(s.data, key)
 	s.stats.Deletes++ // do not need atomic because have exclusive lock already
+	s.stats.Count--
 	s.lock.Unlock()
 }
 
@@ -232,6 +234,7 @@ loop:
 		delete(s.data, key)
 		s.stats.Evictions++ // already have write lock
 	}
+	s.stats.Count = len(s.data)
 	s.lock.Unlock()
 }
 
