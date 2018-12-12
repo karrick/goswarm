@@ -1,1 +1,1 @@
-module "github.com/karrick/goswarm"
+module github.com/karrick/goswarm

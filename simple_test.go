@@ -384,3 +384,333 @@ func TestSimpleGC(t *testing.T) {
 		t.Errorf("Actual: %s; Expected: %s", actual, expected)
 	}
 }
+
+func TestStatsQuery(t *testing.T) {
+	var haveLookupFail bool
+
+	swr, err := NewSimple(&Config{
+		Lookup: func(key string) (interface{}, error) {
+			if haveLookupFail {
+				return nil, errors.New("lookup failure")
+			}
+			time.Sleep(10 * time.Millisecond)
+			return key, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get stats before cache methods invoked.
+	stats := swr.Stats()
+	if got, want := stats.Creates, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Deletes, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Evictions, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Loads, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.LookupErrors, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Queries, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesFresh, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesMiss, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesStale, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Size, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Stores, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Updates, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	// Invoke Query with key not yet in cache.
+	_, err = swr.Query("foo")
+	if got, want := err, error(nil); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	// Get stats after new key-value pair added.
+	stats = swr.Stats()
+	if got, want := stats.Creates, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Deletes, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Evictions, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Loads, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.LookupErrors, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Queries, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesFresh, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesMiss, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesStale, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Size, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Stores, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Updates, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	// Invoke Query with key already in cache.
+	_, err = swr.Query("foo")
+	if got, want := err, error(nil); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	// Get stats after new key-value pair added.
+	stats = swr.Stats()
+	if got, want := stats.Creates, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Deletes, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Evictions, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Loads, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.LookupErrors, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Queries, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesFresh, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesMiss, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesStale, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Size, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Stores, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Updates, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	// Invoke Query with key already in cache.
+	haveLookupFail = true
+	_, err = swr.Query("bar")
+	if err == nil || !strings.Contains(err.Error(), "lookup failure") {
+		t.Errorf("GOT: %v; WANT: %v", err, "lookup failure")
+	}
+
+	// Get stats after new key-value pair added.
+	stats = swr.Stats()
+	if got, want := stats.Creates, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Deletes, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Evictions, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Loads, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.LookupErrors, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Queries, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesFresh, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesMiss, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.QueriesStale, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Size, int64(2); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Stores, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := stats.Updates, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	t.Run("stale", func(t *testing.T) {
+		swr, err := NewSimple(&Config{
+			Lookup: func(key string) (interface{}, error) {
+				time.Sleep(10 * time.Millisecond)
+				now := time.Now()
+				return &TimedValue{
+					Value:  key,
+					Stale:  now.Add(-time.Second),
+					Expiry: now.Add(time.Second),
+				}, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Invoke Query with key not yet in cache, populating it with stale
+		// value.
+		_, err = swr.Query("foo")
+		if got, want := err, error(nil); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		stats := swr.Stats()
+
+		// Invoke Query with key and its stale value already in cache.
+		_, err = swr.Query("foo")
+		if got, want := err, error(nil); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		stats = swr.Stats()
+
+		if got, want := stats.Creates, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Deletes, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Evictions, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Loads, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.LookupErrors, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Queries, int64(1); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.QueriesFresh, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.QueriesMiss, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.QueriesStale, int64(1); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Size, int64(1); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Stores, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Updates, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+	})
+
+	t.Run("expired", func(t *testing.T) {
+		swr, err := NewSimple(&Config{
+			Lookup: func(key string) (interface{}, error) {
+				time.Sleep(10 * time.Millisecond)
+				now := time.Now()
+				return &TimedValue{
+					Value:  key,
+					Stale:  now.Add(-time.Minute),
+					Expiry: now.Add(-time.Second),
+				}, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Invoke Query with key not yet in cache, populating it with expired
+		// value.
+		_, err = swr.Query("foo")
+		if got, want := err, error(nil); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		stats := swr.Stats()
+
+		// Invoke Query with key and its expired value already in cache.
+		_, err = swr.Query("foo")
+		if got, want := err, error(nil); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		stats = swr.Stats()
+
+		if got, want := stats.Creates, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Deletes, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Evictions, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Loads, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.LookupErrors, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Queries, int64(1); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.QueriesFresh, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.QueriesMiss, int64(1); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.QueriesStale, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Size, int64(1); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Stores, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+		if got, want := stats.Updates, int64(0); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+	})
+}

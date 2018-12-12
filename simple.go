@@ -23,15 +23,23 @@ type Simple struct {
 	halt       chan struct{}
 	closeError chan error
 	gcFlag     int32
-
-	stats Stats
+	stats      Stats
 }
 
-// Stats contains various statistics for cache.
+// Stats contains various cache statistics.
 type Stats struct {
-	Count                                        uint64 // Count of items in cache.
-	Loads, Stores, Deletes, Evictions            uint64
-	Queries, QueryHits, QueryMisses, QueryErrors uint64
+	Creates      int64 // Creates represents how many new cache items were created since the previous Stats call.
+	Deletes      int64 // Deletes represents how many Delete calls were made since the previous Stats call.
+	Evictions    int64 // Evictions represents how many evictions took place since the previous Stats call.
+	Loads        int64 // Loads represents how many Load calls were made since the previous Stats call.
+	LookupErrors int64 // LookupErrors represents the number of Lookups invocations that returned an error since the previous Stats call.
+	Queries      int64 // Queries represents how many Query calls were made since the previous Stats call.
+	QueriesFresh int64 // QueriesFresh represents how many Query calls were answered with fresh data.
+	QueriesMiss  int64 // QueriesMiss represents how many Query calls were
+	QueriesStale int64 // QueriesStale represents how many Query calls were answered with stale data.
+	Size         int64 // Size represents the number of items in the cache.
+	Stores       int64 // Stores represents how many Store calls were made since the previous Stats call.
+	Updates      int64 // Updates represents how many Update calls were made since the previous Stats call.
 }
 
 // NewSimple returns Swarm that attempts to respond to Query methods by
@@ -117,6 +125,8 @@ func (s *Simple) Close() error {
 
 // Delete removes the key and associated value from the data map.
 func (s *Simple) Delete(key string) {
+	atomic.AddInt64(&s.stats.Deletes, 1)
+
 	s.lock.RLock()
 	_, ok := s.data[key]
 	s.lock.RUnlock()
@@ -129,8 +139,7 @@ func (s *Simple) Delete(key string) {
 	// delete it.
 	s.lock.Lock()
 	delete(s.data, key)
-	s.stats.Deletes++ // do not need atomic because have exclusive lock already
-	s.stats.Count--
+	atomic.AddInt64(&s.stats.Size, -1)
 	s.lock.Unlock()
 }
 
@@ -224,19 +233,20 @@ loop:
 
 	// SWEEP PHASE: Grab the write lock and delete all doomed key-value pairs
 	// from the cache.
+	delta := int64(len(doomed))
 	s.lock.Lock()
 	for _, key := range doomed {
 		delete(s.data, key)
-		s.stats.Evictions++ // already have write lock
 	}
-	s.stats.Count = len(s.data)
+	atomic.AddInt64(&s.stats.Size, -delta)
+	atomic.AddInt64(&s.stats.Evictions, delta)
 	s.lock.Unlock()
 }
 
 // Load returns the value associated with the specified key, and a boolean value
 // indicating whether or not the key was found in the map.
 func (s *Simple) Load(key string) (interface{}, bool) {
-	atomic.AddUint64(&s.stats.Loads, 1)
+	atomic.AddInt64(&s.stats.Loads, 1)
 
 	// Do not want to use getOrCreateLockingTimeValue, because there's no reason
 	// to create ATV if key is not present in data map.
@@ -264,28 +274,40 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 // lookup of a new value is triggered, then the new value is stored and
 // returned.
 func (s *Simple) Query(key string) (interface{}, error) {
-	atomic.AddUint64(&s.stats.Queries, 1)
+	atomic.AddInt64(&s.stats.Queries, 1)
+
 	atv := s.getOrCreateAtomicTimedValue(key)
 	av := atv.av.Load()
 	if av == nil {
-		tv := s.queryMiss(key, atv)
-		return tv.Value, tv.Err
-	} else {
-		now := time.Now()
-		tv := av.(*TimedValue)
-		if tv.isExpired(now) {
-			tv = s.queryMiss(key, atv)
-		} else if tv.isStale(now) {
-			// If no other goroutine is looking up this value, spin one off
-			if atomic.CompareAndSwapInt32(&atv.pending, 0, 1) {
-				go func() {
-					defer atomic.StoreInt32(&atv.pending, 0)
-					_ = s.queryMiss(key, atv)
-				}()
-			}
-		}
+		atomic.AddInt64(&s.stats.QueriesMiss, 1)
+		tv := s.update(key, atv)
 		return tv.Value, tv.Err
 	}
+
+	now := time.Now()
+	tv := av.(*TimedValue)
+
+	if tv.isExpired(now) {
+		// Expired is considered a miss.
+		atomic.AddInt64(&s.stats.QueriesMiss, 1)
+		tv := s.update(key, atv)
+		return tv.Value, tv.Err
+	}
+
+	if tv.isStale(now) {
+		// If no other goroutine is looking up this value, spin one off.
+		if atomic.CompareAndSwapInt32(&atv.pending, 0, 1) {
+			go func() {
+				defer atomic.StoreInt32(&atv.pending, 0)
+				_ = s.update(key, atv)
+			}()
+		}
+		atomic.AddInt64(&s.stats.QueriesStale, 1)
+		return tv.Value, tv.Err
+	}
+
+	atomic.AddInt64(&s.stats.QueriesFresh, 1)
+	return tv.Value, tv.Err
 }
 
 // Range invokes specified callback function for each non-expired key in the
@@ -316,9 +338,31 @@ func (s *Simple) Range(callback func(key string, value *TimedValue)) {
 	s.lock.RUnlock()
 }
 
+// Stats returns a snapshot of the cache's statistics. Note that except for the
+// Size statistic, all other statistics will be reset when this method is
+// invoked, allowing the client to determine the number of each respective
+// events that have taken place since the previous time this method was invoked.
+func (s *Simple) Stats() Stats {
+	return Stats{
+		Creates:      atomic.SwapInt64(&s.stats.Creates, 0),
+		Deletes:      atomic.SwapInt64(&s.stats.Deletes, 0),
+		Evictions:    atomic.SwapInt64(&s.stats.Evictions, 0),
+		Loads:        atomic.SwapInt64(&s.stats.Loads, 0),
+		LookupErrors: atomic.SwapInt64(&s.stats.LookupErrors, 0),
+		Queries:      atomic.SwapInt64(&s.stats.Queries, 0),
+		QueriesFresh: atomic.SwapInt64(&s.stats.QueriesFresh, 0),
+		QueriesMiss:  atomic.SwapInt64(&s.stats.QueriesMiss, 0),
+		QueriesStale: atomic.SwapInt64(&s.stats.QueriesStale, 0),
+		Size:         atomic.LoadInt64(&s.stats.Size), // NOTE: Load rather than Swap.
+		Stores:       atomic.SwapInt64(&s.stats.Stores, 0),
+		Updates:      atomic.SwapInt64(&s.stats.Updates, 0),
+	}
+}
+
 // Store saves the key-value pair to the cache, overwriting whatever was
 // previously stored.
 func (s *Simple) Store(key string, value interface{}) {
+	atomic.AddInt64(&s.stats.Stores, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
 	tv := newTimedValue(value, nil, s.config.GoodStaleDuration, s.config.GoodExpiryDuration)
 	atv.av.Store(tv)
@@ -326,6 +370,7 @@ func (s *Simple) Store(key string, value interface{}) {
 
 // Update forces an update of the value associated with the specified key.
 func (s *Simple) Update(key string) {
+	atomic.AddInt64(&s.stats.Updates, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
 	s.update(key, atv)
 }
@@ -357,15 +402,12 @@ func (s *Simple) getOrCreateAtomicTimedValue(key string) *atomicTimedValue {
 		if !ok {
 			atv = new(atomicTimedValue)
 			s.data[key] = atv
+			atomic.AddInt64(&s.stats.Creates, 1)
+			atomic.AddInt64(&s.stats.Size, 1)
 		}
 		s.lock.Unlock()
 	}
 	return atv
-}
-
-func (s *Simple) queryMiss(key string, atv *atomicTimedValue) *TimedValue {
-	atomic.AddUint64(&s.stats.QueryMisses, 1)
-	return s.update(key, atv)
 }
 
 // The update method attempts to update a new value for the specified key. If
@@ -382,7 +424,7 @@ func (s *Simple) update(key string, atv *atomicTimedValue) *TimedValue {
 		return tv
 	}
 
-	atomic.AddUint64(&s.stats.QueryErrors, 1)
+	atomic.AddInt64(&s.stats.LookupErrors, 1)
 
 	// lookup gave us an error
 	staleDuration = s.config.BadStaleDuration
