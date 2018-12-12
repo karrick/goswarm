@@ -24,11 +24,6 @@ type Simple struct {
 	closeError chan error
 	gcFlag     int32
 
-	// latencyThreshold is optional parameter that, when not the default 0
-	// value, will only store a key-value pair if invocation of the Lookup took
-	// longer than the threshold.
-	latencyThreshold time.Duration
-
 	stats Stats
 }
 
