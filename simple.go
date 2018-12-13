@@ -31,13 +31,12 @@ type Stats struct {
 	Creates      int64 // Creates represents how many new cache items were created since the previous Stats call.
 	Deletes      int64 // Deletes represents how many Delete calls were made since the previous Stats call.
 	Evictions    int64 // Evictions represents how many evictions took place since the previous Stats call.
-	Loads        int64 // Loads represents how many Load calls were made since the previous Stats call.
+	Hits         int64 // Hits represents how many Load and Query calls found and returned a Fresh item.
 	LookupErrors int64 // LookupErrors represents the number of Lookups invocations that returned an error since the previous Stats call.
-	Queries      int64 // Queries represents how many Query calls were made since the previous Stats call.
-	QueriesFresh int64 // QueriesFresh represents how many Query calls were answered with fresh data.
-	QueriesMiss  int64 // QueriesMiss represents how many Query calls were
-	QueriesStale int64 // QueriesStale represents how many Query calls were answered with stale data.
+	Misses       int64 // Misses represents how many Load and Query calls either did not find the item, or found an expired item.
+	Queries      int64 // Queries represents how many Load and Query calls were made since the previous Stats call.
 	Size         int64 // Size represents the number of items in the cache.
+	Stales       int64 // Stales represents how many Load and Query calls found and returned a Stale item.
 	Stores       int64 // Stores represents how many Store calls were made since the previous Stats call.
 	Updates      int64 // Updates represents how many Update calls were made since the previous Stats call.
 }
@@ -246,7 +245,7 @@ loop:
 // Load returns the value associated with the specified key, and a boolean value
 // indicating whether or not the key was found in the map.
 func (s *Simple) Load(key string) (interface{}, bool) {
-	atomic.AddInt64(&s.stats.Loads, 1)
+	atomic.AddInt64(&s.stats.Queries, 1)
 
 	// Do not want to use getOrCreateLockingTimeValue, because there's no reason
 	// to create ATV if key is not present in data map.
@@ -262,15 +261,23 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 		// Element either recently erased by another routine while this method
 		// was waiting for element lock above, or has not been populated by
 		// fetch, in which case the value is not really there yet.
+		atomic.AddInt64(&s.stats.Misses, 1)
 		return nil, false
 	}
 
+	now := time.Now()
 	tv := av.(*TimedValue)
-	if !tv.IsExpired() {
+
+	if tv.IsExpiredAt(now) {
+		atomic.AddInt64(&s.stats.Misses, 1)
+		return nil, false
+	}
+	if tv.IsStaleAt(now) {
+		atomic.AddInt64(&s.stats.Stales, 1)
 		return tv.Value, true
 	}
-
-	return nil, false
+	atomic.AddInt64(&s.stats.Hits, 1)
+	return tv.Value, true
 }
 
 // Query loads the value associated with the specified key from the data
@@ -285,7 +292,7 @@ func (s *Simple) Query(key string) (interface{}, error) {
 	atv := s.getOrCreateAtomicTimedValue(key)
 	av := atv.av.Load()
 	if av == nil {
-		atomic.AddInt64(&s.stats.QueriesMiss, 1)
+		atomic.AddInt64(&s.stats.Misses, 1)
 		tv := s.update(key, atv)
 		return tv.Value, tv.Err
 	}
@@ -294,8 +301,8 @@ func (s *Simple) Query(key string) (interface{}, error) {
 	tv := av.(*TimedValue)
 
 	if tv.IsExpiredAt(now) {
-		// Expired is considered a miss.
-		atomic.AddInt64(&s.stats.QueriesMiss, 1)
+		// Expired is considered a blocking miss.
+		atomic.AddInt64(&s.stats.Misses, 1)
 		tv := s.update(key, atv)
 		return tv.Value, tv.Err
 	}
@@ -308,11 +315,11 @@ func (s *Simple) Query(key string) (interface{}, error) {
 				_ = s.update(key, atv)
 			}()
 		}
-		atomic.AddInt64(&s.stats.QueriesStale, 1)
+		atomic.AddInt64(&s.stats.Stales, 1)
 		return tv.Value, tv.Err
 	}
 
-	atomic.AddInt64(&s.stats.QueriesFresh, 1)
+	atomic.AddInt64(&s.stats.Hits, 1)
 	return tv.Value, tv.Err
 }
 
@@ -353,13 +360,12 @@ func (s *Simple) Stats() Stats {
 		Creates:      atomic.SwapInt64(&s.stats.Creates, 0),
 		Deletes:      atomic.SwapInt64(&s.stats.Deletes, 0),
 		Evictions:    atomic.SwapInt64(&s.stats.Evictions, 0),
-		Loads:        atomic.SwapInt64(&s.stats.Loads, 0),
+		Hits:         atomic.SwapInt64(&s.stats.Hits, 0),
 		LookupErrors: atomic.SwapInt64(&s.stats.LookupErrors, 0),
+		Misses:       atomic.SwapInt64(&s.stats.Misses, 0),
 		Queries:      atomic.SwapInt64(&s.stats.Queries, 0),
-		QueriesFresh: atomic.SwapInt64(&s.stats.QueriesFresh, 0),
-		QueriesMiss:  atomic.SwapInt64(&s.stats.QueriesMiss, 0),
-		QueriesStale: atomic.SwapInt64(&s.stats.QueriesStale, 0),
 		Size:         atomic.LoadInt64(&s.stats.Size), // NOTE: Load rather than Swap.
+		Stales:       atomic.SwapInt64(&s.stats.Stales, 0),
 		Stores:       atomic.SwapInt64(&s.stats.Stores, 0),
 		Updates:      atomic.SwapInt64(&s.stats.Updates, 0),
 	}

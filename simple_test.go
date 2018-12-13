@@ -443,22 +443,19 @@ func TestStatsQuery(t *testing.T) {
 	if got, want := stats.Evictions, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.Loads, int64(0); got != want {
-		t.Errorf("GOT: %v; WANT: %v", got, want)
-	}
 	if got, want := stats.LookupErrors, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Queries, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesFresh, int64(0); got != want {
+	if got, want := stats.Hits, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesMiss, int64(0); got != want {
+	if got, want := stats.Misses, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesStale, int64(0); got != want {
+	if got, want := stats.Stales, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Size, int64(0); got != want {
@@ -488,22 +485,19 @@ func TestStatsQuery(t *testing.T) {
 	if got, want := stats.Evictions, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.Loads, int64(0); got != want {
-		t.Errorf("GOT: %v; WANT: %v", got, want)
-	}
 	if got, want := stats.LookupErrors, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Queries, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesFresh, int64(0); got != want {
+	if got, want := stats.Hits, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesMiss, int64(1); got != want {
+	if got, want := stats.Misses, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesStale, int64(0); got != want {
+	if got, want := stats.Stales, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Size, int64(1); got != want {
@@ -533,22 +527,19 @@ func TestStatsQuery(t *testing.T) {
 	if got, want := stats.Evictions, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.Loads, int64(0); got != want {
-		t.Errorf("GOT: %v; WANT: %v", got, want)
-	}
 	if got, want := stats.LookupErrors, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Queries, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesFresh, int64(1); got != want {
+	if got, want := stats.Hits, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesMiss, int64(0); got != want {
+	if got, want := stats.Misses, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesStale, int64(0); got != want {
+	if got, want := stats.Stales, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Size, int64(1); got != want {
@@ -579,22 +570,19 @@ func TestStatsQuery(t *testing.T) {
 	if got, want := stats.Evictions, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.Loads, int64(0); got != want {
-		t.Errorf("GOT: %v; WANT: %v", got, want)
-	}
 	if got, want := stats.LookupErrors, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Queries, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesFresh, int64(0); got != want {
+	if got, want := stats.Hits, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesMiss, int64(1); got != want {
+	if got, want := stats.Misses, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.QueriesStale, int64(0); got != want {
+	if got, want := stats.Stales, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Size, int64(2); got != want {
@@ -648,22 +636,19 @@ func TestStatsQuery(t *testing.T) {
 		if got, want := stats.Evictions, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
-		if got, want := stats.Loads, int64(0); got != want {
-			t.Errorf("GOT: %v; WANT: %v", got, want)
-		}
 		if got, want := stats.LookupErrors, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
 		if got, want := stats.Queries, int64(1); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
-		if got, want := stats.QueriesFresh, int64(0); got != want {
+		if got, want := stats.Hits, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
-		if got, want := stats.QueriesMiss, int64(0); got != want {
+		if got, want := stats.Misses, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
-		if got, want := stats.QueriesStale, int64(1); got != want {
+		if got, want := stats.Stales, int64(1); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
 		if got, want := stats.Size, int64(1); got != want {
@@ -718,22 +703,19 @@ func TestStatsQuery(t *testing.T) {
 		if got, want := stats.Evictions, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
-		if got, want := stats.Loads, int64(0); got != want {
-			t.Errorf("GOT: %v; WANT: %v", got, want)
-		}
 		if got, want := stats.LookupErrors, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
 		if got, want := stats.Queries, int64(1); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
-		if got, want := stats.QueriesFresh, int64(0); got != want {
+		if got, want := stats.Hits, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
-		if got, want := stats.QueriesMiss, int64(1); got != want {
+		if got, want := stats.Misses, int64(1); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
-		if got, want := stats.QueriesStale, int64(0); got != want {
+		if got, want := stats.Stales, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
 		if got, want := stats.Size, int64(1); got != want {
