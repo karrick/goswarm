@@ -197,7 +197,7 @@ func (s *Simple) GC() {
 			if av := atv.av.Load(); av != nil {
 				allPairs <- gcPair{
 					key:    key,
-					doomed: av.(*TimedValue).isExpired(now),
+					doomed: av.(*TimedValue).IsExpiredAt(now),
 				}
 			}
 		}(key, atv, allPairs)
@@ -287,14 +287,14 @@ func (s *Simple) Query(key string) (interface{}, error) {
 	now := time.Now()
 	tv := av.(*TimedValue)
 
-	if tv.isExpired(now) {
+	if tv.IsExpiredAt(now) {
 		// Expired is considered a miss.
 		atomic.AddInt64(&s.stats.QueriesMiss, 1)
 		tv := s.update(key, atv)
 		return tv.Value, tv.Err
 	}
 
-	if tv.isStale(now) {
+	if tv.IsStaleAt(now) {
 		// If no other goroutine is looking up this value, spin one off.
 		if atomic.CompareAndSwapInt32(&atv.pending, 0, 1) {
 			go func() {
@@ -364,7 +364,11 @@ func (s *Simple) Stats() Stats {
 func (s *Simple) Store(key string, value interface{}) {
 	atomic.AddInt64(&s.stats.Stores, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
+
+	// NOTE: Below invocation ignores the provided durations when value is
+	// already a TimedValue.
 	tv := newTimedValue(value, nil, s.config.GoodStaleDuration, s.config.GoodExpiryDuration)
+
 	atv.av.Store(tv)
 }
 
@@ -414,21 +418,17 @@ func (s *Simple) getOrCreateAtomicTimedValue(key string) *atomicTimedValue {
 // the update is successful, it stores the value in the TimedValue associated
 // with the key.
 func (s *Simple) update(key string, atv *atomicTimedValue) *TimedValue {
-	staleDuration := s.config.GoodStaleDuration
-	expiryDuration := s.config.GoodExpiryDuration
-
 	value, err := s.config.Lookup(key)
 	if err == nil {
-		tv := newTimedValue(value, err, staleDuration, expiryDuration)
+		tv := newTimedValue(value, nil, s.config.GoodStaleDuration, s.config.GoodExpiryDuration)
 		atv.av.Store(tv)
 		return tv
 	}
 
-	atomic.AddInt64(&s.stats.LookupErrors, 1)
-
 	// lookup gave us an error
-	staleDuration = s.config.BadStaleDuration
-	expiryDuration = s.config.BadExpiryDuration
+	atomic.AddInt64(&s.stats.LookupErrors, 1)
+	staleDuration := s.config.BadStaleDuration
+	expiryDuration := s.config.BadExpiryDuration
 
 	// new error overwrites previous error, and also used when initial value
 	av := atv.av.Load()

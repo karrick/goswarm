@@ -79,7 +79,8 @@ func TestSimpleNoStaleExpireNoLookupWhenBeforeExpire(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that expires one minute in the future
-	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Expiry: time.Now().Add(time.Minute)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Created: now, Expiry: now.Add(time.Minute)})
 
 	ensureValueL(t, swr, "hit", 13)
 }
@@ -96,7 +97,8 @@ func TestSimpleNoStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that expired one minute ago
-	swr.Store("hit", &TimedValue{Value: uint64(42), Err: nil, Expiry: time.Now().Add(-time.Minute)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: uint64(42), Err: nil, Created: now, Expiry: now.Add(-time.Minute)})
 
 	ensureValueL(t, swr, "hit", 42)
 
@@ -117,7 +119,8 @@ func TestSimpleStaleNoExpireNoLookupWhenBeforeStale(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that goes stale one minute in the future
-	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(time.Minute)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Created: now, Stale: now.Add(time.Minute)})
 
 	ensureValueL(t, swr, "hit", 13)
 }
@@ -137,7 +140,8 @@ func TestSimpleStaleNoExpireSynchronousLookupOnlyOnceWhenAfterStale(t *testing.T
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one minute ago
-	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(-time.Minute)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Created: now, Stale: now.Add(-time.Minute)})
 
 	wg.Add(1)
 	ensureValueL(t, swr, "hit", 13)
@@ -165,7 +169,8 @@ func TestSimpleStaleExpireNoLookupWhenBeforeStale(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that goes stale one minute in the future and expires one hour in the future
-	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(time.Minute), Expiry: time.Now().Add(time.Hour)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Created: now, Stale: now.Add(time.Minute), Expiry: now.Add(time.Hour)})
 
 	ensureValueL(t, swr, "hit", 13)
 }
@@ -184,7 +189,8 @@ func TestSimpleStaleExpireSynchronousLookupWhenAfterStaleAndBeforeExpire(t *test
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one minute ago and expires one minute in the future
-	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(-time.Minute), Expiry: time.Now().Add(time.Minute)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Created: now, Stale: now.Add(-time.Minute), Expiry: now.Add(time.Minute)})
 
 	// expect to receive the old value back immediately, then expect lookup to be asynchronously invoked
 	wg.Add(1)
@@ -212,7 +218,8 @@ func TestSimpleStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one hour ago and expired one minute ago
-	swr.Store("hit", &TimedValue{Value: uint64(42), Err: nil, Stale: time.Now().Add(-time.Hour), Expiry: time.Now().Add(-time.Minute)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: uint64(42), Err: nil, Created: now, Stale: now.Add(-time.Hour), Expiry: now.Add(-time.Minute)})
 
 	ensureValueL(t, swr, "hit", 42)
 
@@ -235,7 +242,8 @@ func TestSimpleErrDoesNotReplaceStaleValue(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one minute ago
-	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Stale: time.Now().Add(-time.Minute)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: uint64(13), Err: nil, Created: now, Stale: now.Add(-time.Minute)})
 
 	wg.Add(1)
 	ensureValueL(t, swr, "hit", 13)
@@ -266,7 +274,8 @@ func TestSimpleNewErrReplacesOldError(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value that went stale one minute ago
-	swr.Store("hit", &TimedValue{Value: nil, Err: errors.New("original error"), Stale: time.Now().Add(-time.Minute)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: nil, Err: errors.New("original error"), Created: now, Stale: now.Add(-time.Minute)})
 
 	wg.Add(1)
 	ensureErrorL(t, swr, "hit", "new error")
@@ -292,7 +301,8 @@ func TestSimpleErrReplacesExpiredValue(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	// NOTE: storing a value is already stale, but will expire during the fetch
-	swr.Store("hit", &TimedValue{Value: nil, Err: errors.New("original error"), Stale: time.Now().Add(-time.Hour), Expiry: time.Now().Add(5 * time.Millisecond)})
+	now := time.Now()
+	swr.Store("hit", &TimedValue{Value: nil, Err: errors.New("original error"), Created: now, Stale: now.Add(-time.Hour), Expiry: now.Add(5 * time.Millisecond)})
 
 	wg.Add(1)
 	ensureErrorL(t, swr, "hit", "original error")
@@ -582,9 +592,10 @@ func TestStatsQuery(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 				now := time.Now()
 				return &TimedValue{
-					Value:  key,
-					Stale:  now.Add(-time.Second),
-					Expiry: now.Add(time.Second),
+					Value:   key,
+					Created: now,
+					Stale:   now.Add(-time.Second),
+					Expiry:  now.Add(time.Second),
 				}, nil
 			},
 		})
@@ -651,9 +662,10 @@ func TestStatsQuery(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 				now := time.Now()
 				return &TimedValue{
-					Value:  key,
-					Stale:  now.Add(-time.Minute),
-					Expiry: now.Add(-time.Second),
+					Value:   key,
+					Created: now,
+					Stale:   now.Add(-time.Minute),
+					Expiry:  now.Add(-time.Second),
 				}, nil
 			},
 		})
