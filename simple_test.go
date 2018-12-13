@@ -85,6 +85,27 @@ func TestSimpleNoStaleExpireNoLookupWhenBeforeExpire(t *testing.T) {
 	ensureValueL(t, swr, "hit", 13)
 }
 
+func TestSimpleStaleExpireLoadReturnsFalse(t *testing.T) {
+	swr, err := NewSimple(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = swr.Close() }()
+
+	now := time.Now()
+	swr.Store("expired", &TimedValue{Value: uint64(42), Created: now, Expiry: now.Add(-time.Minute)})
+
+	value, ok := swr.Load("expired")
+
+	if got, want := ok, false; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	if value != nil {
+		t.Errorf("GOT: %v; WANT: %v", value, nil)
+	}
+}
+
 func TestSimpleNoStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {

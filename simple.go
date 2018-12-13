@@ -264,7 +264,13 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 		// fetch, in which case the value is not really there yet.
 		return nil, false
 	}
-	return av.(*TimedValue).Value, true
+
+	tv := av.(*TimedValue)
+	if !tv.IsExpired() {
+		return tv.Value, true
+	}
+
+	return nil, false
 }
 
 // Query loads the value associated with the specified key from the data
