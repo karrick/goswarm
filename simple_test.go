@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-func ensureErrorL(t *testing.T, swr *Simple, key, expectedError string) {
-	value, err := swr.Query(key)
+func ensureErrorL(t *testing.T, querier Querier, key, expectedError string) {
+	value, err := querier.Query(key)
 	if value != nil {
 		t.Errorf("Actual: %v; Expected: %v", value, nil)
 	}
@@ -22,8 +22,8 @@ func ensureErrorL(t *testing.T, swr *Simple, key, expectedError string) {
 	}
 }
 
-func ensureValueL(t *testing.T, swr *Simple, key string, expectedValue uint64) {
-	value, err := swr.Query(key)
+func ensureValueL(t *testing.T, querier Querier, key string, expectedValue uint64) {
+	value, err := querier.Query(key)
 	if value.(uint64) != expectedValue {
 		t.Errorf("Actual: %d; Expected: %d", value, expectedValue)
 	}
@@ -37,7 +37,7 @@ func ensureValueL(t *testing.T, swr *Simple, key string, expectedValue uint64) {
 func TestSimpleSynchronousLookupWhenMiss(t *testing.T) {
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {
-		atomic.AddUint64(&invoked, 1)
+		invoked++
 		return uint64(42), nil
 	}})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestSimpleSynchronousLookupWhenMiss(t *testing.T) {
 
 	ensureValueL(t, swr, "miss", 42)
 
-	if actual, expected := atomic.AddUint64(&invoked, 0), uint64(1); actual != expected {
+	if actual, expected := invoked, uint64(1); actual != expected {
 		t.Errorf("Actual: %d; Expected: %d", actual, expected)
 	}
 }
