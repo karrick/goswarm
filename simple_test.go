@@ -106,6 +106,27 @@ func TestSimpleStaleExpireLoadReturnsFalse(t *testing.T) {
 	}
 }
 
+func TestSimpleStaleExpireLoadTimedValueReturnsExpiredValue(t *testing.T) {
+	swr, err := NewSimple(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = swr.Close() }()
+
+	now := time.Now()
+	swr.Store("expired", &TimedValue{Value: uint64(42), Created: now, Expiry: now.Add(-time.Minute)})
+
+	tv := swr.LoadTimedValue("expired")
+
+	if got, want := tv.IsExpired(), true; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	if got, want := tv.Value, uint64(42); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+}
+
 func TestSimpleNoStaleExpireSynchronousLookupWhenAfterExpire(t *testing.T) {
 	var invoked uint64
 	swr, err := NewSimple(&Config{Lookup: func(_ string) (interface{}, error) {

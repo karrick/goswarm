@@ -281,6 +281,43 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 	return tv.Value, true
 }
 
+// LoadTimedValue returns the TimedValue associated with the specified key, or
+// false if the key is not found in the map.
+func (s *Simple) LoadTimedValue(key string) *TimedValue {
+	atomic.AddInt64(&s.stats.Queries, 1)
+
+	// Do not want to use getOrCreateLockingTimeValue, because there's no reason
+	// to create ATV if key is not present in data map.
+	s.lock.RLock()
+	atv, ok := s.data[key]
+	s.lock.RUnlock()
+	if !ok {
+		atomic.AddInt64(&s.stats.Misses, 1)
+		return nil
+	}
+
+	av := atv.av.Load()
+	if av == nil {
+		// Element either recently erased by another routine while this method
+		// was waiting for element lock above, or has not been populated by
+		// fetch, in which case the value is not really there yet.
+		atomic.AddInt64(&s.stats.Misses, 1)
+		return nil
+	}
+
+	now := time.Now()
+	tv := av.(*TimedValue)
+
+	if tv.IsExpiredAt(now) {
+		atomic.AddInt64(&s.stats.Misses, 1)
+	}
+	if tv.IsStaleAt(now) {
+		atomic.AddInt64(&s.stats.Stales, 1)
+	}
+	atomic.AddInt64(&s.stats.Hits, 1)
+	return tv
+}
+
 // Query loads the value associated with the specified key from the data
 // map. When a stale value is found on Query, at most one asynchronous lookup of
 // a new value is triggered, and the current value is returned from the data
