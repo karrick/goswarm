@@ -253,6 +253,7 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 	atv, ok := s.data[key]
 	s.lock.RUnlock()
 	if !ok {
+		atomic.AddInt64(&s.stats.Misses, 1)
 		return nil, false
 	}
 
