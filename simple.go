@@ -28,14 +28,14 @@ type Simple struct {
 
 // Stats contains various cache statistics.
 type Stats struct {
+	Count        int64 // Count represents the number of items in the cache.
 	Creates      int64 // Creates represents how many new cache items were created since the previous Stats call.
-	Deletes      int64 // Deletes represents how many Delete calls were made since the previous Stats call.
-	Evictions    int64 // Evictions represents how many evictions took place since the previous Stats call.
+	Deletes      int64 // Deletes represents how many Delete calls were made since the previous Stats call. Note this counts when Delete is called with a key that is not in the cache.
+	Evictions    int64 // Evictions represents how many key-value pairs were evicted since the previous Stats call.
 	Hits         int64 // Hits represents how many Load and Query calls found and returned a Fresh item.
-	LookupErrors int64 // LookupErrors represents the number of Lookups invocations that returned an error since the previous Stats call.
+	LookupErrors int64 // LookupErrors represents the number of Lookup invocations that returned an error since the previous Stats call.
 	Misses       int64 // Misses represents how many Load and Query calls either did not find the item, or found an expired item.
 	Queries      int64 // Queries represents how many Load and Query calls were made since the previous Stats call.
-	Size         int64 // Size represents the number of items in the cache.
 	Stales       int64 // Stales represents how many Load and Query calls found and returned a Stale item.
 	Stores       int64 // Stores represents how many Store calls were made since the previous Stats call.
 	Updates      int64 // Updates represents how many Update calls were made since the previous Stats call.
@@ -138,7 +138,6 @@ func (s *Simple) Delete(key string) {
 	// delete it.
 	s.lock.Lock()
 	delete(s.data, key)
-	atomic.AddInt64(&s.stats.Size, -1)
 	s.lock.Unlock()
 }
 
@@ -232,13 +231,11 @@ loop:
 
 	// SWEEP PHASE: Grab the write lock and delete all doomed key-value pairs
 	// from the cache.
-	delta := int64(len(doomed))
 	s.lock.Lock()
 	for _, key := range doomed {
 		delete(s.data, key)
 	}
-	atomic.AddInt64(&s.stats.Size, -delta)
-	atomic.AddInt64(&s.stats.Evictions, delta)
+	atomic.AddInt64(&s.stats.Evictions, int64(len(doomed)))
 	s.lock.Unlock()
 }
 
@@ -389,12 +386,17 @@ func (s *Simple) Range(callback func(key string, value *TimedValue)) {
 	s.lock.RUnlock()
 }
 
-// Stats returns a snapshot of the cache's statistics. Note that except for the
-// Size statistic, all other statistics will be reset when this method is
-// invoked, allowing the client to determine the number of each respective
-// events that have taken place since the previous time this method was invoked.
+// Stats returns a snapshot of the cache's statistics. Note all statistics will
+// be reset when this method is invoked, allowing the client to determine the
+// number of each respective events that have taken place since the previous
+// time this method was invoked.
 func (s *Simple) Stats() Stats {
+	s.lock.RLock()
+	count := int64(len(s.data))
+	s.lock.RUnlock()
+
 	return Stats{
+		Count:        count,
 		Creates:      atomic.SwapInt64(&s.stats.Creates, 0),
 		Deletes:      atomic.SwapInt64(&s.stats.Deletes, 0),
 		Evictions:    atomic.SwapInt64(&s.stats.Evictions, 0),
@@ -402,7 +404,6 @@ func (s *Simple) Stats() Stats {
 		LookupErrors: atomic.SwapInt64(&s.stats.LookupErrors, 0),
 		Misses:       atomic.SwapInt64(&s.stats.Misses, 0),
 		Queries:      atomic.SwapInt64(&s.stats.Queries, 0),
-		Size:         atomic.LoadInt64(&s.stats.Size), // NOTE: Load rather than Swap.
 		Stales:       atomic.SwapInt64(&s.stats.Stales, 0),
 		Stores:       atomic.SwapInt64(&s.stats.Stores, 0),
 		Updates:      atomic.SwapInt64(&s.stats.Updates, 0),
@@ -457,7 +458,6 @@ func (s *Simple) getOrCreateAtomicTimedValue(key string) *atomicTimedValue {
 			atv = new(atomicTimedValue)
 			s.data[key] = atv
 			atomic.AddInt64(&s.stats.Creates, 1)
-			atomic.AddInt64(&s.stats.Size, 1)
 		}
 		s.lock.Unlock()
 	}

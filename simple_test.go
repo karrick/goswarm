@@ -455,6 +455,9 @@ func TestStatsQuery(t *testing.T) {
 
 	// Get stats before cache methods invoked.
 	stats := swr.Stats()
+	if got, want := stats.Count, int64(0); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
 	if got, want := stats.Creates, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
@@ -479,9 +482,6 @@ func TestStatsQuery(t *testing.T) {
 	if got, want := stats.Stales, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.Size, int64(0); got != want {
-		t.Errorf("GOT: %v; WANT: %v", got, want)
-	}
 	if got, want := stats.Stores, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
@@ -497,6 +497,9 @@ func TestStatsQuery(t *testing.T) {
 
 	// Get stats after new key-value pair added.
 	stats = swr.Stats()
+	if got, want := stats.Count, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
 	if got, want := stats.Creates, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
@@ -521,9 +524,6 @@ func TestStatsQuery(t *testing.T) {
 	if got, want := stats.Stales, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.Size, int64(1); got != want {
-		t.Errorf("GOT: %v; WANT: %v", got, want)
-	}
 	if got, want := stats.Stores, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
@@ -539,6 +539,9 @@ func TestStatsQuery(t *testing.T) {
 
 	// Get stats after new key-value pair added.
 	stats = swr.Stats()
+	if got, want := stats.Count, int64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
 	if got, want := stats.Creates, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
@@ -563,9 +566,6 @@ func TestStatsQuery(t *testing.T) {
 	if got, want := stats.Stales, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
-	if got, want := stats.Size, int64(1); got != want {
-		t.Errorf("GOT: %v; WANT: %v", got, want)
-	}
 	if got, want := stats.Stores, int64(0); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
@@ -582,6 +582,9 @@ func TestStatsQuery(t *testing.T) {
 
 	// Get stats after new key-value pair added.
 	stats = swr.Stats()
+	if got, want := stats.Count, int64(2); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
 	if got, want := stats.Creates, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
@@ -604,9 +607,6 @@ func TestStatsQuery(t *testing.T) {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Stales, int64(0); got != want {
-		t.Errorf("GOT: %v; WANT: %v", got, want)
-	}
-	if got, want := stats.Size, int64(2); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 	if got, want := stats.Stores, int64(0); got != want {
@@ -648,6 +648,9 @@ func TestStatsQuery(t *testing.T) {
 		}
 		stats = swr.Stats()
 
+		if got, want := stats.Count, int64(1); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
 		if got, want := stats.Creates, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
@@ -670,9 +673,6 @@ func TestStatsQuery(t *testing.T) {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
 		if got, want := stats.Stales, int64(1); got != want {
-			t.Errorf("GOT: %v; WANT: %v", got, want)
-		}
-		if got, want := stats.Size, int64(1); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
 		if got, want := stats.Stores, int64(0); got != want {
@@ -715,6 +715,9 @@ func TestStatsQuery(t *testing.T) {
 		}
 		stats = swr.Stats()
 
+		if got, want := stats.Count, int64(1); got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
 		if got, want := stats.Creates, int64(0); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
@@ -737,9 +740,6 @@ func TestStatsQuery(t *testing.T) {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
 		if got, want := stats.Stales, int64(0); got != want {
-			t.Errorf("GOT: %v; WANT: %v", got, want)
-		}
-		if got, want := stats.Size, int64(1); got != want {
 			t.Errorf("GOT: %v; WANT: %v", got, want)
 		}
 		if got, want := stats.Stores, int64(0); got != want {
