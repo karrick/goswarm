@@ -307,11 +307,11 @@ func (s *Simple) LoadTimedValue(key string) *TimedValue {
 
 	if tv.IsExpiredAt(now) {
 		atomic.AddInt64(&s.stats.Misses, 1)
-	}
-	if tv.IsStaleAt(now) {
+	} else if tv.IsStaleAt(now) {
 		atomic.AddInt64(&s.stats.Stales, 1)
+	} else {
+		atomic.AddInt64(&s.stats.Hits, 1)
 	}
-	atomic.AddInt64(&s.stats.Hits, 1)
 	return tv
 }
 

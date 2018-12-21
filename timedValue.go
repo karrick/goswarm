@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// TimedValueStatus is an enumeration of the states of a TimedValue: Fresh,
+// Stale, or Expired.
 type TimedValueStatus int
 
 const (
