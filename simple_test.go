@@ -369,13 +369,26 @@ func TestSimpleRange(t *testing.T) {
 	defer func() { _ = swr.Close() }()
 
 	swr.Store("no expiry", "shall not expire")
-	swr.Store("stale value", TimedValue{Value: "stale value", Stale: time.Now().Add(-time.Minute)})
-	swr.Store("expired value", TimedValue{Value: "expired value", Expiry: time.Now().Add(-time.Minute)})
+	swr.Store("expired value", TimedValue{Value: "expired value", Created: time.Now(), Expiry: time.Now().Add(-time.Minute)})
+	swr.Store("stale value", TimedValue{Value: "stale value", Created: time.Now(), Stale: time.Now().Add(-time.Minute)})
+	swr.Store("will update expiry", "soon to be expired")
+
+	swr.Store("will update stale", TimedValue{Value: "stale value", Created: time.Now(), Stale: time.Now().Add(-time.Minute)})
+	// make sure already stale
+	if got, want := swr.LoadTimedValue("will update stale").IsStale(), true; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
 
 	called := make(map[string]struct{})
 	swr.Range(func(key string, value *TimedValue) {
 		called[key] = struct{}{}
 		swr.Store(strconv.Itoa(rand.Intn(50)), "make sure we can invoke methods that require locking")
+		switch key {
+		case "will update stale":
+			value.Stale = time.Now().Add(time.Minute)
+		case "will update expiry":
+			value.Expiry = time.Now().Add(-time.Minute)
+		}
 	})
 
 	if _, ok := called["no expiry"]; !ok {
@@ -386,6 +399,46 @@ func TestSimpleRange(t *testing.T) {
 	}
 	if _, ok := called["expired value"]; ok {
 		t.Errorf("Actual: %#v; Expected: %#v", ok, false)
+	}
+	if _, ok := called["will update stale"]; !ok {
+		t.Errorf("Actual: %#v; Expected: %#v", ok, true)
+	}
+	if got, want := swr.LoadTimedValue("will update stale").IsStale(), false; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := swr.LoadTimedValue("will update expiry").IsExpired(), true; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	swr.Store("ensure range released top level lock", struct{}{})
+}
+
+func TestSimpleRangeBreak(t *testing.T) {
+	swr, err := NewSimple(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = swr.Close() }()
+
+	swr.Store("alpha", 1)
+	swr.Store("bravo", 2)
+	swr.Store("charlie", 3)
+	swr.Store("delta", 4)
+
+	called := make(map[string]struct{})
+	terminated := swr.RangeBreak(func(key string, value *TimedValue) bool {
+		called[key] = struct{}{}
+		if key == "charlie" {
+			return true
+		}
+		return false
+	})
+
+	if got, want := terminated, true; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if _, ok := called["charlie"]; !ok {
+		t.Errorf("Actual: %#v; Expected: %#v", ok, true)
 	}
 
 	swr.Store("ensure range released top level lock", struct{}{})

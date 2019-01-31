@@ -386,6 +386,39 @@ func (s *Simple) Range(callback func(key string, value *TimedValue)) {
 	s.lock.RUnlock()
 }
 
+// RangeBreak invokes specified callback function for each non-expired key in
+// the data map. Each key-value pair is independently locked until the callback
+// function invoked with the specified key returns. This method does not block
+// access to the Simple instance, allowing keys to be added and removed like
+// normal even while the callbacks are running. When the callback returns true,
+// this function performs an early termination of enumerating the cache,
+// returning true it its caller.
+func (s *Simple) RangeBreak(callback func(key string, value *TimedValue) bool) bool {
+	// Need to have read lock while enumerating key-value pairs from map
+	s.lock.RLock()
+	for key, atv := range s.data {
+		// Now that we have a key-value pair from the map, we can release the
+		// map's lock to prevent blocking other routines that need it.
+		s.lock.RUnlock()
+
+		if av := atv.av.Load(); av != nil {
+			// We have an element. If it's not yet expired, invoke the user's
+			// callback with the key and value.
+			if tv := av.(*TimedValue); !tv.IsExpired() {
+				if callback(key, tv) {
+					return true
+				}
+			}
+		}
+
+		// After callback is done with element, re-acquire map-level lock before
+		// we grab the next key-value pair from the map.
+		s.lock.RLock()
+	}
+	s.lock.RUnlock()
+	return false
+}
+
 // Stats returns a snapshot of the cache's statistics. Note all statistics will
 // be reset when this method is invoked, allowing the client to determine the
 // number of each respective events that have taken place since the previous
