@@ -16,10 +16,8 @@ const (
 
 // CacheEntry represents a single entry in a cache. This structure is meant to
 // be consumed by upstream clients.
-//
-// TODO: optimize this structure
 type CacheEntry struct {
-	times   CacheTimes
+	times   CacheTimes  // expired -> fresh -> stale -> expired, etc . . .
 	value   interface{} // must be able to cache and return regular values
 	err     error       // must be able to cache and return error values
 	cond    *sync.Cond
@@ -45,11 +43,11 @@ func NewCacheEntry() *CacheEntry {
 // before calling.
 func (entry *CacheEntry) Load(now time.Time) (interface{}, error) {
 	entry.cond.L.Lock()
-	// NOTE: Remember that cache elements are initialize as expired. Also
-	// remember that expired is synonymous with unknown. Once we have either a
-	// value or an error, then expiry will be updated and this function will
-	// return with either a value or an error.
-	for entry.times.ExpiresAt.After(now) {
+	// NOTE: Remember that cache elements are initialize as unknown. Also
+	// remember that unknown is synonymous with expired. Therefore when an entry
+	// is expired, then it is also unknown, and we must wait until something
+	// fills it.
+	for !now.Before(entry.times.ExpiresAt) { // while expired
 		entry.cond.Wait()
 	}
 	value, err := entry.value, entry.err
@@ -59,7 +57,7 @@ func (entry *CacheEntry) Load(now time.Time) (interface{}, error) {
 
 // WARNING: must hold entry lock for duration of this call.
 func (entry *CacheEntry) transition(now time.Time) {
-	if entry.times.ExpiresAt.After(now) {
+	if !now.Before(entry.times.ExpiresAt) { // if expired
 		// release memory held by these fields
 		entry.value = nil
 		entry.err = nil
