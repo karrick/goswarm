@@ -3,7 +3,7 @@ package goswarm
 import "fmt"
 
 // Value1 is a type whose semantic value might be unknown, have some proper
-// value, or have an error. It is a hybrid between an Option and a Result in
+// value, or have an error.  It is a hybrid between an Option and a Result in
 // Rust.
 type Value1 struct {
 	value  interface{}
@@ -20,7 +20,7 @@ func (v Value1) Load() (interface{}, error, bool) {
 	return v.value, nil, true
 }
 
-func (v *Value1) StoreOk(value interface{}) {
+func (v *Value1) StoreValue(value interface{}) {
 	v.value = value
 	v.status = ValueFresh
 }

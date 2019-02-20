@@ -19,40 +19,40 @@ func (v Value3) Load() (interface{}, error, VST) {
 	var value interface{}
 	var err error
 	var vst VST
-	v.WithSharedLock(func(v *SharedLockedValue) {
-		value, err, vst = v.Load()
+	v.WithSharedLock(func(sl *SharedLockedValue) {
+		value, err, vst = sl.Load()
 	})
 	return value, err, vst
 }
 
-func (v *Value3) StoreOk(times CacheTimes, value interface{}) {
-	v.WithExclusiveLock(func(v *ExclusiveLockedValue) {
-		v.StoreOk(times, value)
+func (v *Value3) StoreValue(times CacheTimes, value interface{}) {
+	v.WithExclusiveLock(func(el *ExclusiveLockedValue) {
+		el.StoreValue(times, value)
 	})
 }
 
 func (v *Value3) StoreError(times CacheTimes, err error) {
-	v.WithExclusiveLock(func(v *ExclusiveLockedValue) {
-		v.StoreError(times, err)
+	v.WithExclusiveLock(func(el *ExclusiveLockedValue) {
+		el.StoreError(times, err)
 	})
 }
 
 func (v *Value3) StoreErrorf(times CacheTimes, format string, a ...interface{}) {
-	v.WithExclusiveLock(func(v *ExclusiveLockedValue) {
-		v.StoreErrorf(times, format, a...)
+	v.WithExclusiveLock(func(el *ExclusiveLockedValue) {
+		el.StoreErrorf(times, format, a...)
 	})
 }
 
 // Reset returns the instance to its initialized state.
 func (v *Value3) Reset() {
-	v.WithExclusiveLock(func(v *ExclusiveLockedValue) {
-		v.Reset()
+	v.WithExclusiveLock(func(el *ExclusiveLockedValue) {
+		el.Reset()
 	})
 }
 
 func (v Value3) resetWhenExpired() {
 	v.lock.Lock()
-	if !(v.times.ExpiresAt.IsZero() || time.Now().Before(v.times.ExpiresAt)) {
+	if !(v.times.ExpiresAt.IsZero() || time.Now().Before(v.times.ExpiresAt)) { // if expired
 		var zero CacheTimes
 		v.times = zero
 		v.value = nil
@@ -77,72 +77,70 @@ type ExclusiveLockedValue struct {
 	v *Value3
 }
 
-func (v *ExclusiveLockedValue) Load() (interface{}, error, VST) {
+func (el *ExclusiveLockedValue) Load() (interface{}, error, VST) {
 	now := time.Now()
 	// When expired, it does not matter what is stored in the structure.
-	if !(v.v.times.ExpiresAt.IsZero() || now.Before(v.v.times.ExpiresAt)) {
+	if !(el.v.times.ExpiresAt.IsZero() || now.Before(el.v.times.ExpiresAt)) {
 		return nil, nil, ValueNone
 	}
 	// When not expired, and an error, return it.
-	if v.v.err != nil {
-		err := v.v.err
+	if el.v.err != nil {
+		err := el.v.err
 		return nil, err, ValueError
 	}
+	value := el.v.value
 	// Now it's just a question of fresh or stale.
-	if v.v.times.StaleAt.IsZero() || now.Before(v.v.times.StaleAt) {
-		value := v.v.value
+	if el.v.times.StaleAt.IsZero() || now.Before(el.v.times.StaleAt) {
 		return value, nil, ValueFresh
 	}
-	value := v.v.value
 	return value, nil, ValueStale
 }
 
-func (v *ExclusiveLockedValue) StoreOk(times CacheTimes, value interface{}) {
-	v.v.times = times
-	v.v.value = value
-	v.v.err = nil
+func (el *ExclusiveLockedValue) StoreValue(times CacheTimes, value interface{}) {
+	el.v.times = times
+	el.v.value = value
+	el.v.err = nil
 }
 
-func (v *ExclusiveLockedValue) StoreError(times CacheTimes, err error) {
-	v.v.times = times
-	v.v.value = nil
-	v.v.err = err
+func (el *ExclusiveLockedValue) StoreError(times CacheTimes, err error) {
+	el.v.times = times
+	el.v.value = nil
+	el.v.err = err
 }
 
-func (v *ExclusiveLockedValue) StoreErrorf(times CacheTimes, format string, a ...interface{}) {
-	v.v.times = times
-	v.v.value = nil
-	v.v.err = fmt.Errorf(format, a...)
+func (el *ExclusiveLockedValue) StoreErrorf(times CacheTimes, format string, a ...interface{}) {
+	el.v.times = times
+	el.v.value = nil
+	el.v.err = fmt.Errorf(format, a...)
 }
 
 // Reset returns the instance to its initialized state.
-func (v *ExclusiveLockedValue) Reset() {
+func (el *ExclusiveLockedValue) Reset() {
 	var zero CacheTimes
-	v.v.times = zero
-	v.v.value = nil
-	v.v.err = nil
+	el.v.times = zero
+	el.v.value = nil
+	el.v.err = nil
 }
 
 type SharedLockedValue struct {
 	v *Value3
 }
 
-func (v *SharedLockedValue) Load() (interface{}, error, VST) {
+func (sl *SharedLockedValue) Load() (interface{}, error, VST) {
 	now := time.Now()
 	// When expired, it does not matter what is stored in the structure.
-	if !(v.v.times.ExpiresAt.IsZero() || now.Before(v.v.times.ExpiresAt)) {
+	if !(sl.v.times.ExpiresAt.IsZero() || now.Before(sl.v.times.ExpiresAt)) {
 		return nil, nil, ValueNone
 	}
 	// When not expired, and an error, return it.
-	if v.v.err != nil {
-		err := v.v.err
+	if sl.v.err != nil {
+		err := sl.v.err
 		return nil, err, ValueError
 	}
+	value := sl.v.value
 	// Now it's just a question of fresh or stale.
-	if v.v.times.StaleAt.IsZero() || now.Before(v.v.times.StaleAt) {
-		value := v.v.value
+	if sl.v.times.StaleAt.IsZero() || now.Before(sl.v.times.StaleAt) {
 		return value, nil, ValueFresh
 	}
-	value := v.v.value
 	return value, nil, ValueStale
 }

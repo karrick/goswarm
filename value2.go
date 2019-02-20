@@ -40,7 +40,7 @@ func (v Value2) Load() (interface{}, error, VST) {
 	return value, nil, ValueStale
 }
 
-func (v *Value2) StoreOk(times CacheTimes, value interface{}) {
+func (v *Value2) StoreValue(times CacheTimes, value interface{}) {
 	v.lock.Lock()
 	v.times = times
 	v.value = value

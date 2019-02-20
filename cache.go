@@ -3,6 +3,7 @@ package goswarm
 import (
 	"errors"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -43,9 +44,9 @@ type Cache struct {
 	err                                     chan error
 }
 
-// expectedStaleHeapSize does not need to be accurate. If the value is too
+// expectedStaleHeapSize does not need to be accurate.  If the value is too
 // small, then the heap will simply allocate more RAM and cope with the
-// additional memory requirements. If the value is too large, then some
+// additional memory requirements.  If the value is too large, then some
 // allocated memory is wasted.
 const expectedStaleHeapSize = 1000000 // one million
 
@@ -62,6 +63,7 @@ func NewCache(config *CacheConfig) (*Cache, error) {
 	} else {
 		// TODO: validate config items
 	}
+
 	c := &Cache{
 		data:                make(map[string]*CacheEntry),
 		fresh:               config.Fresh,
@@ -76,6 +78,7 @@ func NewCache(config *CacheConfig) (*Cache, error) {
 		stop:                make(chan struct{}),
 		err:                 make(chan error),
 	}
+
 	go c.run()
 	return c, nil
 }
@@ -140,6 +143,9 @@ func (c *Cache) run() {
 }
 
 func (c *Cache) evict() {
+	// Poor design: holds exclusive lock while enumerating keys, and each loop
+	// waits for an item to not be locked, when that item might be locked for a
+	// very long time by the code using this cache.
 	c.lock.Lock()
 	now := time.Now()
 
@@ -147,7 +153,7 @@ func (c *Cache) evict() {
 		// TODO: how long wait for a lock; alternative is use CAS on some ownership field.
 		entry.cond.L.Lock()
 
-		if entry.times.ExpiresAt.Before(now) {
+		if !now.Before(entry.times.ExpiresAt) {
 			delete(c.data, key)
 		}
 
@@ -170,10 +176,9 @@ func (c *Cache) Close() error {
 }
 
 func (c *Cache) LoadFromFile(pathname string) error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	// TODO: load the cache
-	return errors.New("TODO")
+	return withOpenFile(pathname, func(fh *os.File) error {
+		return c.LoadFromReader(fh)
+	})
 }
 
 func (c *Cache) LoadFromReader(r io.Reader) error {
@@ -187,10 +192,9 @@ func (c *Cache) loadFromReader(r io.Reader) error {
 }
 
 func (c *Cache) StoreToFile(pathname string) error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	// TODO: store the cache
-	return errors.New("TODO")
+	return withTempFile(pathname, func(tempFile *os.File, tempPathname string) error {
+		return c.StoreToWriter(tempFile)
+	})
 }
 
 func (c *Cache) StoreToWriter(w io.Writer) error {
