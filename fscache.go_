@@ -1,0 +1,317 @@
+package goswarm
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/OneOfOne/xxhash"
+	"github.com/karrick/godirwalk"
+	"golang.org/x/sys/unix"
+)
+
+const (
+	DefaultTTL                 = time.Hour
+	DefaultEvictionPeriodicity = 15 * time.Minute
+)
+
+type FSCacheConfig struct {
+	// EvictionPeriodicity is how often cache scans for and evicts entries older
+	// than TTL.
+	EvictionPeriodicity time.Duration
+
+	// TTL specifies entry Time-To-Live. Zero implies no entry expiration.
+	TTL time.Duration
+}
+
+type FSCache struct {
+	rootdir             string
+	evictionPeriodicity int64
+	ttl                 int64
+	updateConfig, stop  chan struct{}
+	err                 chan error
+}
+
+func NewFSCache(rootdir string, config *FSCacheConfig) (*FSCache, error) {
+	if config == nil {
+		config = &FSCacheConfig{
+			TTL:                 DefaultTTL,
+			EvictionPeriodicity: DefaultEvictionPeriodicity,
+		}
+	} else {
+		if config.TTL < 0 {
+			return nil, fmt.Errorf("cannot create FSCache: negative TTL: %s", config.TTL)
+		}
+		if config.EvictionPeriodicity <= 0 {
+			return nil, fmt.Errorf("cannot create FSCache: negative EvictionPeriodicity: %s", config.EvictionPeriodicity)
+		}
+	}
+
+	fi, err := os.Stat(rootdir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("cannot create FSCache: %s", err)
+		}
+		if err = os.MkdirAll(rootdir, os.ModePerm); err != nil {
+			return nil, fmt.Errorf("cannot create FSCache: %s", err)
+		}
+	} else if !fi.IsDir() {
+		return nil, fmt.Errorf("cannot create FSCache: pathname is not a directory: %q; %v", rootdir, fi.Mode())
+	}
+
+	c := &FSCache{
+		rootdir:             rootdir,
+		evictionPeriodicity: int64(config.EvictionPeriodicity),
+		ttl:                 int64(config.TTL),
+		updateConfig:        make(chan struct{}),
+		stop:                make(chan struct{}),
+		err:                 make(chan error),
+	}
+
+	go c.run()
+	return c, nil
+}
+
+func (c *FSCache) run() {
+	var err error
+
+	previousEviction := time.Now()
+	if ttl := atomic.LoadInt64(&c.ttl); ttl > 0 {
+		err = c.evict(previousEviction.UnixNano()-ttl, true)
+	} else {
+		err = c.evict(0, true) // just remove temp files (nothing was created prior to 0)
+	}
+	if err != nil {
+		log.Printf("[WARNING] cannot evict old entries: %s", err)
+	}
+	evictionTimer := time.NewTimer(time.Duration(atomic.LoadInt64(&c.evictionPeriodicity)))
+
+	for {
+		select {
+
+		case previousEviction = <-evictionTimer.C:
+			if ttl := atomic.LoadInt64(&c.ttl); ttl > 0 {
+				// Only evict when TTL is not 0
+				if err := c.evict(previousEviction.UnixNano()-ttl, false); err != nil {
+					log.Printf("[WARNING] cannot evict old entries: %s", err)
+				}
+			}
+			evictionTimer.Reset(time.Duration(atomic.LoadInt64(&c.evictionPeriodicity)))
+
+		case <-c.updateConfig:
+			now := time.Now()
+			if !evictionTimer.Stop() {
+				<-evictionTimer.C // drain timer events
+			}
+			if remaining := previousEviction.Add(time.Duration(atomic.LoadInt64(&c.evictionPeriodicity))).Sub(now); remaining > 0 {
+				evictionTimer.Reset(remaining)
+			} else {
+				previousEviction = now
+				if ttl := atomic.LoadInt64(&c.ttl); ttl > 0 {
+					// Only evict when TTL is not 0
+					if err := c.evict(previousEviction.UnixNano()-ttl, false); err != nil {
+						log.Printf("[WARNING] cannot evict old entries: %s", err)
+					}
+				}
+				evictionTimer.Reset(time.Duration(atomic.LoadInt64(&c.evictionPeriodicity)))
+			}
+
+		case <-c.stop:
+			c.err <- nil
+			return
+		}
+	}
+}
+
+func (c *FSCache) evict(removeBefore int64, cleanupTemps bool) error {
+	scratchBuffer := make([]byte, 32768)
+
+	return godirwalk.Walk(c.rootdir, &godirwalk.Options{
+		Unsorted:      true,
+		ScratchBuffer: scratchBuffer,
+		Callback: func(osPathname string, de *godirwalk.Dirent) error {
+			// When non-regular file, immediately return.
+			if !de.IsRegular() {
+				return nil
+			}
+			if cleanupTemps && strings.HasSuffix(de.Name(), ".temp") {
+				return os.Remove(osPathname)
+			}
+			// Remove files older than threshold.
+			fi, err := os.Stat(osPathname)
+			if err != nil {
+				return err
+			}
+			if fi.ModTime().UnixNano() >= removeBefore {
+				return nil
+			}
+			return os.Remove(osPathname)
+		},
+		PostChildrenCallback: func(osPathname string, _ *godirwalk.Dirent) error {
+			if osPathname == c.rootdir {
+				return nil // do not remove provided root directory
+			}
+			deChildren, err := godirwalk.ReadDirents(osPathname, scratchBuffer)
+			if err != nil {
+				return fmt.Errorf("cannot ReadDirents: %s", err)
+			}
+			// NOTE: ReadDirents skips "." and ".."
+			if len(deChildren) > 0 {
+				return nil // this directory has children; no additional work here
+			}
+			return os.Remove(osPathname)
+		},
+	})
+}
+
+func (c *FSCache) Close() error {
+	close(c.stop)
+	return <-c.err
+}
+
+func (c *FSCache) pathname(key string) string {
+	h := xxhash.New64()
+	h.Write([]byte(key))
+	hexSum := fmt.Sprintf("%016x", h.Sum64())
+
+	parts := make([]string, 9)
+	parts[0] = c.rootdir
+
+	i := 1
+	for j := 0; j < 16; j += 2 {
+		parts[i] = hexSum[j : j+2]
+		i++
+	}
+
+	return filepath.Join(parts...)
+}
+
+// ReadItem opens the file corresponding to the specified key and invokes the
+// provided callback with a io.ReadSeeker.  In all cases it closes the file
+// handle prior to returning.  When the provided callback returns an error, this
+// function returns that error.  Otherwise it returns the result of closing the
+// open file handle.
+func (c *FSCache) ReadItem(key string, callback func(io.ReadSeeker, os.FileInfo) error) (err error) {
+	fh, err := os.Open(c.pathname(key))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err2 := fh.Close(); err == nil {
+			err = err2
+		}
+	}()
+	var fi os.FileInfo
+	fi, err = fh.Stat()
+	if err != nil {
+		return
+	}
+	err = callback(fh, fi)
+	return
+}
+
+// WriteItem opens a temporary file corresponding to the specified key and
+// invokes the provided callback with a io.WriteSeeker.  When this function
+// opens the file yet fails to acquire an exclusive lock on the file handle,
+// this function immediately closes the file and returns nil error, without
+// invoking the callback.
+//
+//     func example() {
+//         err := c.WriteItem(someKey, func(ws io.WriteSeeker) error {
+//             // Only one go-routine can get here at a time.  If we get here,
+//             // we are responsible to determine the value and to write it.
+//             return errors.New("TODO")
+//         })
+//         if err != nil {
+//             panic(err)
+//         }
+//     }
+func (c *FSCache) WriteItem(key string, callback func(io.WriteSeeker) error) error {
+	finalPathname := c.pathname(key)
+	tempPathname := finalPathname + ".temp"
+
+	var fh *os.File
+	var err error
+
+	// Rather than attempt to create the file system directories for each write,
+	// attempt to open the temp file, and when the returned error indicates that
+	// there is a missing directory component, attempt to create the directory
+	// path.
+	for {
+		if fh, err = os.OpenFile(tempPathname, os.O_RDWR|os.O_CREATE, os.ModePerm); err == nil {
+			break // file created; break from loop
+		}
+		if !os.IsNotExist(err) {
+			return err // some other error; cannot proceed
+		}
+		if err = os.MkdirAll(filepath.Dir(tempPathname), os.ModePerm); err != nil {
+			return err
+		}
+	}
+
+	if err = unix.Flock(int(fh.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		fh.Close()
+		return nil // something else has temp file locked; skip invoking callback
+	}
+
+	// Rather than needlessly truncating the temp file each time, only need to
+	// do so if the file has bytes in it.
+	var fi os.FileInfo
+	if fi, err = fh.Stat(); err != nil {
+		fh.Close()
+		return err
+	}
+	if fi.Size() > 0 {
+		if err = fh.Truncate(0); err != nil {
+			fh.Close()
+			return err
+		}
+	}
+
+	callbackError := callback(fh)
+	closeError := fh.Close() // NOTE: releases exclusive lock on temp file
+
+	if callbackError != nil {
+		// ignore error returned by close
+		// consider removing temporary file
+		// ship rename
+		return callbackError
+	}
+
+	if closeError != nil {
+		// consider removing temporary file
+		// skip rename
+		return fmt.Errorf("cannot close temporary file: %s", closeError)
+	}
+
+	if err = os.Rename(tempPathname, finalPathname); err != nil {
+		return fmt.Errorf("cannot rename temporary file: %s", err)
+	}
+
+	return nil
+}
+
+func (c *FSCache) UpdateConfig(config *FSCacheConfig) error {
+	if config == nil {
+		config = &FSCacheConfig{
+			TTL:                 DefaultTTL,
+			EvictionPeriodicity: DefaultEvictionPeriodicity,
+		}
+	} else {
+		if config.TTL < 0 {
+			return fmt.Errorf("cannot create FSCache: negative TTL: %s", config.TTL)
+		}
+		if config.EvictionPeriodicity <= 0 {
+			return fmt.Errorf("cannot create FSCache: negative EvictionPeriodicity: %s", config.EvictionPeriodicity)
+		}
+	}
+	atomic.StoreUint64(&c.ttl, uint64(config.TTL))
+	atomic.StoreUint64(&c.evictionPeriodicity, uint64(config.EvictionPeriodicity))
+	c.updateConfig <- struct{}{}
+	return nil
+}

@@ -1,0 +1,19 @@
+package goswarm
+
+import "testing"
+
+func TestFSCachePathname(t *testing.T) {
+	c := &FSCache{rootdir: "/fake"}
+
+	if got, want := c.pathname(""), "/fake/ef/46/db/37/51/d8/e9/99"; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	if got, want := c.pathname("empty"), "/fake/a5/b4/b5/06/5b/8c/a3/5b"; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	if got, want := c.pathname("test"), "/fake/4f/dc/ca/5d/db/67/81/39"; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+}
