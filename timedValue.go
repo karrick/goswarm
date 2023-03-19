@@ -28,9 +28,9 @@ const (
 
 // TimedValue couples a value or the error with both a stale and expiry time for
 // the value and error.
-type TimedValue struct {
+type TimedValue[T any] struct {
 	// Value stores the datum returned by the lookup function.
-	Value interface{}
+	Value T
 
 	// Err stores the error returned by the lookup function.
 	Err error
@@ -57,7 +57,7 @@ type TimedValue struct {
 // A value is expired when its non-zero expiry time is before the current time,
 // or when the value represents an error and expiry time is the time.Time
 // zero-value.
-func (tv *TimedValue) IsExpired() bool {
+func (tv *TimedValue[T]) IsExpired() bool {
 	return tv.IsExpiredAt(time.Now())
 }
 
@@ -66,7 +66,7 @@ func (tv *TimedValue) IsExpired() bool {
 // A value is expired when its non-zero expiry time is before the specified
 // time, or when the value represents an error and expiry time is the time.Time
 // zero-value.
-func (tv *TimedValue) IsExpiredAt(when time.Time) bool {
+func (tv *TimedValue[T]) IsExpiredAt(when time.Time) bool {
 	if tv.Err == nil {
 		return !tv.Expiry.IsZero() && when.After(tv.Expiry)
 	}
@@ -80,7 +80,7 @@ func (tv *TimedValue) IsExpiredAt(when time.Time) bool {
 // A value is stale when its non-zero stale time is before the current time, or
 // when the value represents an error and stale time is the time.Time
 // zero-value.
-func (tv *TimedValue) IsStale() bool {
+func (tv *TimedValue[T]) IsStale() bool {
 	return tv.IsStaleAt(time.Now())
 }
 
@@ -89,7 +89,7 @@ func (tv *TimedValue) IsStale() bool {
 // A value is stale when its non-zero stale time is before the specified time,
 // or when the value represents an error and stale time is the time.Time
 // zero-value.
-func (tv *TimedValue) IsStaleAt(when time.Time) bool {
+func (tv *TimedValue[T]) IsStaleAt(when time.Time) bool {
 	if tv.Err == nil {
 		return !tv.Stale.IsZero() && when.After(tv.Stale)
 	}
@@ -100,13 +100,13 @@ func (tv *TimedValue) IsStaleAt(when time.Time) bool {
 
 // Status returns Fresh, Stale, or Exired, depending on the status of the
 // TimedValue item at the current time.
-func (tv *TimedValue) Status() TimedValueStatus {
+func (tv *TimedValue[T]) Status() TimedValueStatus {
 	return tv.StatusAt(time.Now())
 }
 
 // StatusAt returns Fresh, Stale, or Exired, depending on the status of the
 // TimedValue item at the specified time.
-func (tv *TimedValue) StatusAt(when time.Time) TimedValueStatus {
+func (tv *TimedValue[T]) StatusAt(when time.Time) TimedValueStatus {
 	if tv.IsExpiredAt(when) {
 		return Expired
 	}
@@ -117,36 +117,23 @@ func (tv *TimedValue) StatusAt(when time.Time) TimedValueStatus {
 }
 
 // helper function to wrap non TimedValue items as TimedValue items.
-func newTimedValue(value interface{}, err error, staleDuration, expiryDuration time.Duration) *TimedValue {
-	switch val := value.(type) {
-	case TimedValue:
-		if val.Created.IsZero() {
-			val.Created = time.Now()
-		}
-		return &val
-	case *TimedValue:
-		if val.Created.IsZero() {
-			val.Created = time.Now()
-		}
-		return val
-	default:
-		if staleDuration == 0 && expiryDuration == 0 {
-			return &TimedValue{Value: value, Err: err, Created: time.Now()}
-		}
-		var stale, expiry time.Time
-		now := time.Now()
-		if staleDuration > 0 {
-			stale = now.Add(staleDuration)
-		}
-		if expiryDuration > 0 {
-			expiry = now.Add(expiryDuration)
-		}
-		return &TimedValue{Value: value, Err: err, Created: time.Now(), Stale: stale, Expiry: expiry}
+func newTimedValue[T any](value T, err error, staleDuration, expiryDuration time.Duration) *TimedValue[T] {
+	if staleDuration == 0 && expiryDuration == 0 {
+		return &TimedValue[T]{Value: value, Err: err, Created: time.Now()}
 	}
+	var stale, expiry time.Time
+	now := time.Now()
+	if staleDuration > 0 {
+		stale = now.Add(staleDuration)
+	}
+	if expiryDuration > 0 {
+		expiry = now.Add(expiryDuration)
+	}
+	return &TimedValue[T]{Value: value, Err: err, Created: time.Now(), Stale: stale, Expiry: expiry}
 }
 
 type atomicTimedValue struct {
-	// av is accessed with atomic.Value's Load() and Store() methods to
+	// av is accessed with atomic.Value's Load() and StoreTimed() methods to
 	// atomically access the underlying *TimedValue.
 	av atomic.Value
 

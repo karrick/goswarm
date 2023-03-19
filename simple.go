@@ -11,13 +11,13 @@ import (
 // Simple memoizes responses from a Querier, providing very low-level
 // time-based control of how values go stale or expire. When a new value is
 // stored in the Simple instance, if it is a TimedValue item--or a pointer to a
-// TimedValue item)--the data map will use the provided Stale and Expiry
+// TimedValue item--the data map will use the provided Stale and Expiry
 // values. If the new value is not a TimedValue instance or pointer to a
 // TimedValue instance, then the Simple instance wraps the value in a
 // TimedValue struct, and adds the Simple instance's stale and expiry durations
 // to the current time and stores the resultant TimedValue instance.
-type Simple struct {
-	config     *Config
+type Simple[T any] struct {
+	config     *Config[T]
 	data       map[string]*atomicTimedValue
 	lock       sync.RWMutex
 	halt       chan struct{}
@@ -37,7 +37,7 @@ type Stats struct {
 	Misses       int64 // Misses represents how many Load and Query calls either did not find the item, or found an expired item.
 	Queries      int64 // Queries represents how many Load and Query calls were made since the previous Stats call.
 	Stales       int64 // Stales represents how many Load and Query calls found and returned a Stale item.
-	Stores       int64 // Stores represents how many Store calls were made since the previous Stats call.
+	Stores       int64 // Stores represents how many StoreTimed calls were made since the previous Stats call.
 	Updates      int64 // Updates represents how many Update calls were made since the previous Stats call.
 }
 
@@ -47,24 +47,24 @@ type Stats struct {
 // creating an instance with defaults can be done by passing a nil value rather
 // than a pointer to a Config instance.
 //
-//    simple, err := goswarm.NewSimple(&goswarm.Simple{
-//        GoodStaleDuration:  time.Minute,
-//        GoodExpiryDuration: 24 * time.Hour,
-//        BadStaleDuration:   time.Minute,
-//        BadExpiryDuration:  5 * time.Minute,
-//        Lookup:             func(key string) (interface{}, error) {
-//            // TODO: do slow calculation or make a network call
-//            result := key // example
-//            return result, nil
-//        },
-//    })
-//    if err != nil {
-//        log.Fatal(err)
-//    }
-//    defer func() { _ = simple.Close() }()
-func NewSimple(config *Config) (*Simple, error) {
+//	simple, err := goswarm.NewSimple(&goswarm.Simple{
+//	    GoodStaleDuration:  time.Minute,
+//	    GoodExpiryDuration: 24 * time.Hour,
+//	    BadStaleDuration:   time.Minute,
+//	    BadExpiryDuration:  5 * time.Minute,
+//	    Lookup:             func(key string) (T, error) {
+//	        // TODO: do slow calculation or make a network call
+//	        result := key // example
+//	        return result, nil
+//	    },
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer func() { _ = simple.Close() }()
+func NewSimple[T any](config *Config[T]) (*Simple[T], error) {
 	if config == nil {
-		config = &Config{}
+		config = &Config[T]{}
 	}
 	if config.GoodStaleDuration < 0 {
 		return nil, fmt.Errorf("cannot create Swarm with negative good stale duration: %v", config.GoodStaleDuration)
@@ -97,9 +97,9 @@ func NewSimple(config *Config) (*Simple, error) {
 		config.GCTimeout = defaultGCTimeout
 	}
 	if config.Lookup == nil {
-		config.Lookup = func(_ string) (interface{}, error) { return nil, errors.New("no lookup defined") }
+		config.Lookup = func(_ string) (T, error) { return empty[T](), errors.New("no lookup defined") }
 	}
-	s := &Simple{
+	s := &Simple[T]{
 		config: config,
 		data:   make(map[string]*atomicTimedValue),
 	}
@@ -114,7 +114,7 @@ func NewSimple(config *Config) (*Simple, error) {
 // Close releases all memory and go-routines used by the Simple swarm. If
 // during instantiation, GCPeriodicity was greater than the zero-value for
 // time.Duration, this method may block while completing any in progress GC run.
-func (s *Simple) Close() error {
+func (s *Simple[T]) Close() error {
 	if s.config.GCPeriodicity > 0 {
 		close(s.halt)
 		return <-s.closeError
@@ -123,7 +123,7 @@ func (s *Simple) Close() error {
 }
 
 // Delete removes the key and associated value from the data map.
-func (s *Simple) Delete(key string) {
+func (s *Simple[T]) Delete(key string) {
 	atomic.AddInt64(&s.stats.Deletes, 1)
 
 	s.lock.RLock()
@@ -148,7 +148,7 @@ type gcPair struct {
 
 // GC examines all key value pairs in the Simple swarm and deletes those whose
 // values have expired.
-func (s *Simple) GC() {
+func (s *Simple[T]) GC() {
 	// Bail if another GC thread is already running. This may happen
 	// automatically when GCPeriodicity is shorter than GCTimeout, or when user
 	// manually invokes GC method.
@@ -195,7 +195,7 @@ func (s *Simple) GC() {
 			if av := atv.av.Load(); av != nil {
 				allPairs <- gcPair{
 					key:    key,
-					doomed: av.(*TimedValue).IsExpiredAt(now),
+					doomed: av.(*TimedValue[T]).IsExpiredAt(now),
 				}
 			}
 		}(key, atv, allPairs)
@@ -229,7 +229,7 @@ loop:
 		}
 	}
 
-	// SWEEP PHASE: Grab the write lock and delete all doomed key-value pairs
+	// SWEEP PHASE: Grab write lock and delete all doomed key-value pairs
 	// from the cache.
 	s.lock.Lock()
 	for _, key := range doomed {
@@ -239,9 +239,14 @@ loop:
 	s.lock.Unlock()
 }
 
+func empty[T any]() T {
+	var result T
+	return result
+}
+
 // Load returns the value associated with the specified key, and a boolean value
-// indicating whether or not the key was found in the map.
-func (s *Simple) Load(key string) (interface{}, bool) {
+// indicating whether the key was found in the map.
+func (s *Simple[T]) Load(key string) (T, bool) {
 	atomic.AddInt64(&s.stats.Queries, 1)
 
 	// Do not want to use getOrCreateLockingTimeValue, because there's no reason
@@ -251,7 +256,7 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 	s.lock.RUnlock()
 	if !ok {
 		atomic.AddInt64(&s.stats.Misses, 1)
-		return nil, false
+		return empty[T](), false
 	}
 
 	av := atv.av.Load()
@@ -260,15 +265,15 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 		// was waiting for element lock above, or has not been populated by
 		// fetch, in which case the value is not really there yet.
 		atomic.AddInt64(&s.stats.Misses, 1)
-		return nil, false
+		return empty[T](), false
 	}
 
 	now := time.Now()
-	tv := av.(*TimedValue)
+	tv := av.(*TimedValue[T])
 
 	if tv.IsExpiredAt(now) {
 		atomic.AddInt64(&s.stats.Misses, 1)
-		return nil, false
+		return empty[T](), false
 	}
 	if tv.IsStaleAt(now) {
 		atomic.AddInt64(&s.stats.Stales, 1)
@@ -280,7 +285,7 @@ func (s *Simple) Load(key string) (interface{}, bool) {
 
 // LoadTimedValue returns the TimedValue associated with the specified key, or
 // false if the key is not found in the map.
-func (s *Simple) LoadTimedValue(key string) *TimedValue {
+func (s *Simple[T]) LoadTimedValue(key string) *TimedValue[T] {
 	atomic.AddInt64(&s.stats.Queries, 1)
 
 	// Do not want to use getOrCreateLockingTimeValue, because there's no reason
@@ -303,7 +308,7 @@ func (s *Simple) LoadTimedValue(key string) *TimedValue {
 	}
 
 	now := time.Now()
-	tv := av.(*TimedValue)
+	tv := av.(*TimedValue[T])
 
 	if tv.IsExpiredAt(now) {
 		atomic.AddInt64(&s.stats.Misses, 1)
@@ -321,7 +326,7 @@ func (s *Simple) LoadTimedValue(key string) *TimedValue {
 // map. When no value or an expired value is found on Query, a synchronous
 // lookup of a new value is triggered, then the new value is stored and
 // returned.
-func (s *Simple) Query(key string) (interface{}, error) {
+func (s *Simple[T]) Query(key string) (T, error) {
 	atomic.AddInt64(&s.stats.Queries, 1)
 
 	atv := s.getOrCreateAtomicTimedValue(key)
@@ -333,13 +338,13 @@ func (s *Simple) Query(key string) (interface{}, error) {
 	}
 
 	now := time.Now()
-	tv := av.(*TimedValue)
+	tv := av.(*TimedValue[T])
 
 	if tv.IsExpiredAt(now) {
 		// Expired is considered a blocking miss.
 		atomic.AddInt64(&s.stats.Misses, 1)
-		tv := s.update(key, atv)
-		return tv.Value, tv.Err
+		newTv := s.update(key, atv)
+		return newTv.Value, newTv.Err
 	}
 
 	if tv.IsStaleAt(now) {
@@ -363,7 +368,7 @@ func (s *Simple) Query(key string) (interface{}, error) {
 // function invoked with the specified key returns. This method does not block
 // access to the Simple instance, allowing keys to be added and removed like
 // normal even while the callbacks are running.
-func (s *Simple) Range(callback func(key string, value *TimedValue)) {
+func (s *Simple[T]) Range(callback func(key string, value *TimedValue[T])) {
 	// Need to have read lock while enumerating key-value pairs from map
 	s.lock.RLock()
 	for key, atv := range s.data {
@@ -374,7 +379,7 @@ func (s *Simple) Range(callback func(key string, value *TimedValue)) {
 		if av := atv.av.Load(); av != nil {
 			// We have an element. If it's not yet expired, invoke the user's
 			// callback with the key and value.
-			if tv := av.(*TimedValue); !tv.IsExpired() {
+			if tv := av.(*TimedValue[T]); !tv.IsExpired() {
 				callback(key, tv)
 			}
 		}
@@ -393,7 +398,7 @@ func (s *Simple) Range(callback func(key string, value *TimedValue)) {
 // normal even while the callbacks are running. When the callback returns true,
 // this function performs an early termination of enumerating the cache,
 // returning true it its caller.
-func (s *Simple) RangeBreak(callback func(key string, value *TimedValue) bool) bool {
+func (s *Simple[T]) RangeBreak(callback func(key string, value *TimedValue[T]) bool) bool {
 	// Need to have read lock while enumerating key-value pairs from map
 	s.lock.RLock()
 	for key, atv := range s.data {
@@ -404,7 +409,7 @@ func (s *Simple) RangeBreak(callback func(key string, value *TimedValue) bool) b
 		if av := atv.av.Load(); av != nil {
 			// We have an element. If it's not yet expired, invoke the user's
 			// callback with the key and value.
-			if tv := av.(*TimedValue); !tv.IsExpired() {
+			if tv := av.(*TimedValue[T]); !tv.IsExpired() {
 				if callback(key, tv) {
 					return true
 				}
@@ -423,7 +428,7 @@ func (s *Simple) RangeBreak(callback func(key string, value *TimedValue) bool) b
 // be reset when this method is invoked, allowing the client to determine the
 // number of each respective events that have taken place since the previous
 // time this method was invoked.
-func (s *Simple) Stats() Stats {
+func (s *Simple[T]) Stats() Stats {
 	s.lock.RLock()
 	count := int64(len(s.data))
 	s.lock.RUnlock()
@@ -445,7 +450,7 @@ func (s *Simple) Stats() Stats {
 
 // Store saves the key-value pair to the cache, overwriting whatever was
 // previously stored.
-func (s *Simple) Store(key string, value interface{}) {
+func (s *Simple[T]) Store(key string, value T) {
 	atomic.AddInt64(&s.stats.Stores, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
 
@@ -456,8 +461,14 @@ func (s *Simple) Store(key string, value interface{}) {
 	atv.av.Store(tv)
 }
 
+func (s *Simple[T]) StoreTimed(key string, tv *TimedValue[T]) {
+	atomic.AddInt64(&s.stats.Stores, 1)
+	atv := s.getOrCreateAtomicTimedValue(key)
+	atv.av.Store(tv)
+}
+
 // Update forces an update of the value associated with the specified key.
-func (s *Simple) Update(key string) {
+func (s *Simple[T]) Update(key string) {
 	atomic.AddInt64(&s.stats.Updates, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
 	s.update(key, atv)
@@ -465,7 +476,7 @@ func (s *Simple) Update(key string) {
 
 ////////////////////////////////////////
 
-func (s *Simple) run() {
+func (s *Simple[T]) run() {
 	for {
 		select {
 		case <-time.After(s.config.GCPeriodicity):
@@ -478,7 +489,7 @@ func (s *Simple) run() {
 	}
 }
 
-func (s *Simple) getOrCreateAtomicTimedValue(key string) *atomicTimedValue {
+func (s *Simple[T]) getOrCreateAtomicTimedValue(key string) *atomicTimedValue {
 	s.lock.RLock()
 	atv, ok := s.data[key]
 	s.lock.RUnlock()
@@ -500,7 +511,7 @@ func (s *Simple) getOrCreateAtomicTimedValue(key string) *atomicTimedValue {
 // The update method attempts to update a new value for the specified key. If
 // the update is successful, it stores the value in the TimedValue associated
 // with the key.
-func (s *Simple) update(key string, atv *atomicTimedValue) *TimedValue {
+func (s *Simple[T]) update(key string, atv *atomicTimedValue) *TimedValue[T] {
 	value, err := s.config.Lookup(key)
 	if err == nil {
 		tv := newTimedValue(value, nil, s.config.GoodStaleDuration, s.config.GoodExpiryDuration)
@@ -515,7 +526,7 @@ func (s *Simple) update(key string, atv *atomicTimedValue) *TimedValue {
 
 	// new error overwrites previous error, and also used when initial value
 	av := atv.av.Load()
-	if av == nil || av.(*TimedValue).Err != nil {
+	if av == nil || av.(*TimedValue[T]).Err != nil {
 		tv := newTimedValue(value, err, staleDuration, expiryDuration)
 		atv.av.Store(tv)
 		return tv
@@ -523,7 +534,7 @@ func (s *Simple) update(key string, atv *atomicTimedValue) *TimedValue {
 
 	// received error this time, but still have old value, and we only replace a
 	// good value with an error if the good value has expired
-	tv := av.(*TimedValue)
+	tv := av.(*TimedValue[T])
 	if tv.IsExpired() {
 		tv = newTimedValue(value, err, staleDuration, expiryDuration)
 		atv.av.Store(tv)
