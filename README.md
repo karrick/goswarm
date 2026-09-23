@@ -66,6 +66,57 @@ lookup function to fetch the value for that key.
     fmt.Printf("The value is: %v\n", value)
 ```
 
+## Storing Values Of A Specific Type With Generics
+
+When all values stored in the map have the same type, use `NewSwarm`
+to create a `Swarm` instance with a type parameter specifying the
+type of the values. It provides the same methods as `Simple`, but
+values returned by `Load` and `Query` have the specified type, so
+there is no need for type assertions. This requires Go 1.19 or above.
+
+```Go
+    swarm, err := goswarm.NewSwarm(&goswarm.SwarmConfig[uint64]{
+        GoodStaleDuration:  time.Minute,
+        GoodExpiryDuration: 24 * time.Hour,
+        Lookup: func(key string) (uint64, error) {
+            // TODO: do slow calculation or make a network call
+            return strconv.ParseUint(key, 10, 64)
+        },
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer func() { _ = swarm.Close() }()
+
+    var value uint64 // no type assertion required
+    value, err = swarm.Query("42")
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("The value is: %d\n", value)
+
+    swarm.Store("13", 13)
+
+    // Store a value with explicit stale and expiry times.
+    now := time.Now()
+    swarm.StoreTimedValue("99", &goswarm.SwarmTimedValue[uint64]{
+        Value:  99,
+        Stale:  now.Add(time.Minute),
+        Expiry: now.Add(time.Hour),
+    })
+```
+
+When no configuration is required, the type parameter must be
+provided explicitly:
+
+```Go
+    swarm, err := goswarm.NewSwarm[string](nil)
+```
+
+`Simple` is implemented using `Swarm[interface{}]`, and `Config` and
+`TimedValue` are aliases for `SwarmConfig[interface{}]` and
+`SwarmTimedValue[interface{}]`, respectively.
+
 ## Stale-While-Revalidate and Stale-If-Error
 
 In addition, goswarm provides stale-while-revalidate and

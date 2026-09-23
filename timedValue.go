@@ -27,10 +27,16 @@ const (
 )
 
 // TimedValue couples a value or the error with both a stale and expiry time for
-// the value and error.
-type TimedValue struct {
+// the value and error. It is an alias of SwarmTimedValue instantiated with
+// interface{} values, and is the type of value stored by Simple.
+type TimedValue = SwarmTimedValue[interface{}]
+
+// SwarmTimedValue couples a value or the error with both a stale and expiry
+// time for the value and error. The type parameter T specifies the type of the
+// value.
+type SwarmTimedValue[T any] struct {
 	// Value stores the datum returned by the lookup function.
-	Value interface{}
+	Value T
 
 	// Err stores the error returned by the lookup function.
 	Err error
@@ -57,7 +63,7 @@ type TimedValue struct {
 // A value is expired when its non-zero expiry time is before the current time,
 // or when the value represents an error and expiry time is the time.Time
 // zero-value.
-func (tv *TimedValue) IsExpired() bool {
+func (tv *SwarmTimedValue[T]) IsExpired() bool {
 	return tv.IsExpiredAt(time.Now())
 }
 
@@ -66,7 +72,7 @@ func (tv *TimedValue) IsExpired() bool {
 // A value is expired when its non-zero expiry time is before the specified
 // time, or when the value represents an error and expiry time is the time.Time
 // zero-value.
-func (tv *TimedValue) IsExpiredAt(when time.Time) bool {
+func (tv *SwarmTimedValue[T]) IsExpiredAt(when time.Time) bool {
 	if tv.Err == nil {
 		return !tv.Expiry.IsZero() && when.After(tv.Expiry)
 	}
@@ -80,7 +86,7 @@ func (tv *TimedValue) IsExpiredAt(when time.Time) bool {
 // A value is stale when its non-zero stale time is before the current time, or
 // when the value represents an error and stale time is the time.Time
 // zero-value.
-func (tv *TimedValue) IsStale() bool {
+func (tv *SwarmTimedValue[T]) IsStale() bool {
 	return tv.IsStaleAt(time.Now())
 }
 
@@ -89,7 +95,7 @@ func (tv *TimedValue) IsStale() bool {
 // A value is stale when its non-zero stale time is before the specified time,
 // or when the value represents an error and stale time is the time.Time
 // zero-value.
-func (tv *TimedValue) IsStaleAt(when time.Time) bool {
+func (tv *SwarmTimedValue[T]) IsStaleAt(when time.Time) bool {
 	if tv.Err == nil {
 		return !tv.Stale.IsZero() && when.After(tv.Stale)
 	}
@@ -100,13 +106,13 @@ func (tv *TimedValue) IsStaleAt(when time.Time) bool {
 
 // Status returns Fresh, Stale, or Exired, depending on the status of the
 // TimedValue item at the current time.
-func (tv *TimedValue) Status() TimedValueStatus {
+func (tv *SwarmTimedValue[T]) Status() TimedValueStatus {
 	return tv.StatusAt(time.Now())
 }
 
 // StatusAt returns Fresh, Stale, or Exired, depending on the status of the
 // TimedValue item at the specified time.
-func (tv *TimedValue) StatusAt(when time.Time) TimedValueStatus {
+func (tv *SwarmTimedValue[T]) StatusAt(when time.Time) TimedValueStatus {
 	if tv.IsExpiredAt(when) {
 		return Expired
 	}
@@ -116,39 +122,24 @@ func (tv *TimedValue) StatusAt(when time.Time) TimedValueStatus {
 	return Fresh
 }
 
-// helper function to wrap non TimedValue items as TimedValue items.
-func newTimedValue(value interface{}, err error, staleDuration, expiryDuration time.Duration) *TimedValue {
-	switch val := value.(type) {
-	case TimedValue:
-		if val.Created.IsZero() {
-			val.Created = time.Now()
-		}
-		return &val
-	case *TimedValue:
-		if val.Created.IsZero() {
-			val.Created = time.Now()
-		}
-		return val
-	default:
-		if staleDuration == 0 && expiryDuration == 0 {
-			return &TimedValue{Value: value, Err: err, Created: time.Now()}
-		}
-		var stale, expiry time.Time
-		now := time.Now()
-		if staleDuration > 0 {
-			stale = now.Add(staleDuration)
-		}
-		if expiryDuration > 0 {
-			expiry = now.Add(expiryDuration)
-		}
-		return &TimedValue{Value: value, Err: err, Created: time.Now(), Stale: stale, Expiry: expiry}
+// helper function to wrap values as SwarmTimedValue items, using the specified
+// stale and expiry durations.
+func newTimedValue[T any](value T, err error, staleDuration, expiryDuration time.Duration) *SwarmTimedValue[T] {
+	now := time.Now()
+	tv := &SwarmTimedValue[T]{Value: value, Err: err, Created: now}
+	if staleDuration > 0 {
+		tv.Stale = now.Add(staleDuration)
 	}
+	if expiryDuration > 0 {
+		tv.Expiry = now.Add(expiryDuration)
+	}
+	return tv
 }
 
-type atomicTimedValue struct {
-	// av is accessed with atomic.Value's Load() and Store() methods to
-	// atomically access the underlying *TimedValue.
-	av atomic.Value
+type atomicTimedValue[T any] struct {
+	// av is accessed with atomic.Pointer's Load() and Store() methods to
+	// atomically access the underlying *SwarmTimedValue.
+	av atomic.Pointer[SwarmTimedValue[T]]
 
 	// pending is accessed with sync/atomic primitives to control whether an
 	// asynchronous lookup ought to be spawned to update av. 1 when a go routine
