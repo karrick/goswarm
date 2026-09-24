@@ -132,9 +132,9 @@ provided explicitly:
     swarm, err := goswarm.NewSwarm[int64, string](nil)
 ```
 
-`Simple` is implemented using `Swarm[string, interface{}]`, and
-`Config` and `TimedValue` are aliases for `SwarmConfig[string,
-interface{}]` and `SwarmTimedValue[interface{}]`, respectively.
+`Simple` is implemented using `Swarm[string, any]`, and `Config` and
+`TimedValue` are aliases for `SwarmConfig[string, any]` and
+`SwarmTimedValue[any]`, respectively.
 
 ## Stale-While-Revalidate and Stale-If-Error
 

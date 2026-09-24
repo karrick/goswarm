@@ -28,8 +28,8 @@ const (
 
 // TimedValue couples a value or the error with both a stale and expiry time for
 // the value and error. It is an alias of SwarmTimedValue instantiated with
-// interface{} values, and is the type of value stored by Simple.
-type TimedValue = SwarmTimedValue[interface{}]
+// any values, and is the type of value stored by Simple.
+type TimedValue = SwarmTimedValue[any]
 
 // SwarmTimedValue couples a value or the error with both a stale and expiry
 // time for the value and error. The type parameter T specifies the type of the

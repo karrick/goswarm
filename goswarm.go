@@ -5,12 +5,12 @@ import "time"
 // Querier specifies a type that provides memoizing the results of expensive function calls and
 // returning the cached result when the same input key occurs again.
 type Querier interface {
-	Query(string) (interface{}, error)
+	Query(string) (any, error)
 }
 
 // Config specifies the configuration parameters for a Simple instance. It is
-// an alias of SwarmConfig instantiated with string keys and interface{} values.
-type Config = SwarmConfig[string, interface{}]
+// an alias of SwarmConfig instantiated with string keys and any values.
+type Config = SwarmConfig[string, any]
 
 // SwarmConfig specifies the configuration parameters for a Swarm instance. The
 // type parameter K specifies the type of the keys, and the type parameter T

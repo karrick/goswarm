@@ -9,11 +9,11 @@ package goswarm
 // TimedValue struct, and adds the Simple instance's stale and expiry durations
 // to the current time and stores the resultant TimedValue instance.
 //
-// Simple stores values of any type as interface{}, requiring callers to perform
-// type assertions on values returned by Load and Query. Consider using Swarm,
-// created by NewSwarm, to store values of a specific type.
+// Simple stores values of any type, requiring callers to perform type
+// assertions on values returned by Load and Query. Consider using Swarm, created
+// by NewSwarm, to store keys and values of specific types.
 type Simple struct {
-	swarm *Swarm[string, interface{}]
+	swarm *Swarm[string, any]
 }
 
 // NewSimple returns Swarm that attempts to respond to Query methods by
@@ -27,7 +27,7 @@ type Simple struct {
 //	    GoodExpiryDuration: 24 * time.Hour,
 //	    BadStaleDuration:   time.Minute,
 //	    BadExpiryDuration:  5 * time.Minute,
-//	    Lookup:             func(key string) (interface{}, error) {
+//	    Lookup:             func(key string) (any, error) {
 //	        // TODO: do slow calculation or make a network call
 //	        result := key // example
 //	        return result, nil
@@ -59,7 +59,7 @@ func (s *Simple) GC() { s.swarm.GC() }
 
 // Load returns the value associated with the specified key, and a boolean value
 // indicating whether or not the key was found in the map.
-func (s *Simple) Load(key string) (interface{}, bool) { return s.swarm.Load(key) }
+func (s *Simple) Load(key string) (any, bool) { return s.swarm.Load(key) }
 
 // LoadTimedValue returns the TimedValue associated with the specified key, or
 // nil if the key is not found in the map.
@@ -71,7 +71,7 @@ func (s *Simple) LoadTimedValue(key string) *TimedValue { return s.swarm.LoadTim
 // map. When no value or an expired value is found on Query, a synchronous
 // lookup of a new value is triggered, then the new value is stored and
 // returned.
-func (s *Simple) Query(key string) (interface{}, error) { return s.swarm.Query(key) }
+func (s *Simple) Query(key string) (any, error) { return s.swarm.Query(key) }
 
 // Range invokes specified callback function for each non-expired key in the
 // data map. Each key-value pair is independently locked until the callback
@@ -101,7 +101,7 @@ func (s *Simple) Stats() Stats { return s.swarm.Stats() }
 
 // Store saves the key-value pair to the cache, overwriting whatever was
 // previously stored.
-func (s *Simple) Store(key string, value interface{}) {
+func (s *Simple) Store(key string, value any) {
 	// NOTE: The configured durations are ignored when value is already a
 	// TimedValue.
 	switch val := value.(type) {
