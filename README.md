@@ -59,8 +59,9 @@ lookup function to fetch the value for that key.
     }
     defer func() { _ = simple.Close() }()
 
-    value, err := simple.Query("%version")
-    if !err {
+    key := "%version"
+    value, err := simple.Query(key)
+    if err != nil {
         panic(fmt.Errorf("cannot retrieve value for key %q: %s", key, err))
     }
     fmt.Printf("The value is: %v\n", value)
@@ -122,7 +123,11 @@ Keys are not limited to strings:
     }
     defer func() { _ = swarm.Close() }()
 
-    distance, err := swarm.Query(point{X: 3, Y: 4}) // 5
+    distance, err := swarm.Query(point{X: 3, Y: 4})
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("The distance is: %v\n", distance) // 5
 ```
 
 When no configuration is required, the type parameters must be
@@ -222,8 +227,9 @@ of downstream faults and latencies.
     }
     defer func() { _ = simple.Close() }()
 
-    value, err := simple.Query("%version")
-    if !err {
+    key := "%version"
+    value, err := simple.Query(key)
+    if err != nil {
         panic(fmt.Errorf("cannot retrieve value for key %q: %s", key, err))
     }
     fmt.Printf("The value is: %v\n", value)
