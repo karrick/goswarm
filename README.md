@@ -21,7 +21,7 @@ at
     // you can store any Go type in a Swarm
     simple.Store("someKeyString", 42)
     simple.Store("anotherKey", struct{}{})
-    simple.Store("yetAnotherKey", make(chan interface{}))
+    simple.Store("yetAnotherKey", make(chan any))
 
     // but when you retrieve it, you are responsible to perform type assertions
     key := "yetAnotherKey"
@@ -29,7 +29,7 @@ at
     if !ok {
         panic(fmt.Errorf("cannot find %q", key))
     }
-    value = value.(chan interface{})
+    value = value.(chan any)
 
     simple.Delete("anotherKey")
 ```
@@ -48,7 +48,7 @@ lookup function to fetch the value for that key.
 
 ```Go
     simple, err := goswarm.NewSimple(&goswarm.Config{
-        Lookup: func(key string) (interface{}, error) {
+        Lookup: func(key string) (any, error) {
             // TODO: do slow calculation or make a network call
             result := key // example
             return result, nil
@@ -178,7 +178,7 @@ data map that have an expired time. When this feature is used, the
         GoodExpiryDuration: 24 * time.Hour,
         BadExpiryDuration:  5 * time.Minute,
         GCPeriodicity:      time.Hour,
-        Lookup:             func(key string) (interface{}, error) {
+        Lookup:             func(key string) (any, error) {
             // TODO: do slow calculation or make a network call
             result := key // example
             return result, nil
@@ -211,7 +211,7 @@ of downstream faults and latencies.
         BadStaleDuration:   time.Minute,
         BadExpiryDuration:  5 * time.Minute,
         GCPeriodicity:      time.Hour,
-        Lookup:             func(key string) (interface{}, error) {
+        Lookup:             func(key string) (any, error) {
             // TODO: do slow calculation or make a network call
             result := key // example
             return result, nil
