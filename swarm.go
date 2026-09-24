@@ -9,18 +9,20 @@ import (
 )
 
 // Swarm memoizes responses from a Lookup function, providing very low-level
-// time-based control of how values go stale or expire. The type parameter T
-// specifies the type of the values stored in the Swarm, removing the need for
-// callers to perform type assertions on values returned by Load and Query.
+// time-based control of how values go stale or expire. The type parameter K
+// specifies the type of the keys, which may be any comparable type, and the
+// type parameter T specifies the type of the values stored in the Swarm,
+// removing the need for callers to perform type assertions on values returned
+// by Load and Query.
 //
 // When a new value is stored using the Store method, the Swarm instance wraps
 // the value in a SwarmTimedValue struct, adds the Swarm instance's good stale
 // and expiry durations to the current time, and stores the resultant
 // SwarmTimedValue instance. When a SwarmTimedValue is stored using the
 // StoreTimedValue method, the data map uses its Stale and Expiry values.
-type Swarm[T any] struct {
-	config     *SwarmConfig[T]
-	data       map[string]*atomicTimedValue[T]
+type Swarm[K comparable, T any] struct {
+	config     *SwarmConfig[K, T]
+	data       map[K]*atomicTimedValue[T]
 	lock       sync.RWMutex
 	halt       chan struct{}
 	closeError chan error
@@ -47,10 +49,10 @@ type Stats struct {
 // consulting its TTL cache, then invoking the configured Lookup function if a
 // valid response is not stored. Note this function accepts a pointer so
 // creating an instance with defaults can be done by passing a nil value rather
-// than a pointer to a SwarmConfig instance, in which case the type parameter
-// must be provided explicitly, e.g., goswarm.NewSwarm[int](nil).
+// than a pointer to a SwarmConfig instance, in which case the type parameters
+// must be provided explicitly, e.g., goswarm.NewSwarm[string, int](nil).
 //
-//	swarm, err := goswarm.NewSwarm(&goswarm.SwarmConfig[uint64]{
+//	swarm, err := goswarm.NewSwarm(&goswarm.SwarmConfig[string, uint64]{
 //	    GoodStaleDuration:  time.Minute,
 //	    GoodExpiryDuration: 24 * time.Hour,
 //	    BadStaleDuration:   time.Minute,
@@ -64,9 +66,9 @@ type Stats struct {
 //	    log.Fatal(err)
 //	}
 //	defer func() { _ = swarm.Close() }()
-func NewSwarm[T any](config *SwarmConfig[T]) (*Swarm[T], error) {
+func NewSwarm[K comparable, T any](config *SwarmConfig[K, T]) (*Swarm[K, T], error) {
 	if config == nil {
-		config = &SwarmConfig[T]{}
+		config = &SwarmConfig[K, T]{}
 	}
 	if config.GoodStaleDuration < 0 {
 		return nil, fmt.Errorf("cannot create Swarm with negative good stale duration: %v", config.GoodStaleDuration)
@@ -99,14 +101,14 @@ func NewSwarm[T any](config *SwarmConfig[T]) (*Swarm[T], error) {
 		config.GCTimeout = defaultGCTimeout
 	}
 	if config.Lookup == nil {
-		config.Lookup = func(_ string) (T, error) {
+		config.Lookup = func(_ K) (T, error) {
 			var zero T
 			return zero, errors.New("no lookup defined")
 		}
 	}
-	s := &Swarm[T]{
+	s := &Swarm[K, T]{
 		config: config,
-		data:   make(map[string]*atomicTimedValue[T]),
+		data:   make(map[K]*atomicTimedValue[T]),
 	}
 	if config.GCPeriodicity > 0 {
 		s.halt = make(chan struct{})
@@ -119,7 +121,7 @@ func NewSwarm[T any](config *SwarmConfig[T]) (*Swarm[T], error) {
 // Close releases all memory and go-routines used by the Swarm. If
 // during instantiation, GCPeriodicity was greater than the zero-value for
 // time.Duration, this method may block while completing any in progress GC run.
-func (s *Swarm[T]) Close() error {
+func (s *Swarm[K, T]) Close() error {
 	if s.config.GCPeriodicity > 0 {
 		close(s.halt)
 		return <-s.closeError
@@ -128,7 +130,7 @@ func (s *Swarm[T]) Close() error {
 }
 
 // Delete removes the key and associated value from the data map.
-func (s *Swarm[T]) Delete(key string) {
+func (s *Swarm[K, T]) Delete(key K) {
 	atomic.AddInt64(&s.stats.Deletes, 1)
 
 	s.lock.RLock()
@@ -146,14 +148,14 @@ func (s *Swarm[T]) Delete(key string) {
 	s.lock.Unlock()
 }
 
-type gcPair struct {
-	key    string
+type gcPair[K comparable] struct {
+	key    K
 	doomed bool
 }
 
 // GC examines all key value pairs in the Swarm and deletes those whose
 // values have expired.
-func (s *Swarm[T]) GC() {
+func (s *Swarm[K, T]) GC() {
 	// Bail if another GC thread is already running. This may happen
 	// automatically when GCPeriodicity is shorter than GCTimeout, or when user
 	// manually invokes GC method.
@@ -189,16 +191,16 @@ func (s *Swarm[T]) GC() {
 	// goroutines created below will not block on sending to a full channel that
 	// is no longer consumed after mark phase has ended.
 	totalCount := len(s.data)
-	allPairs := make(chan gcPair, totalCount)
+	allPairs := make(chan gcPair[K], totalCount)
 
 	// Loop through all existing key-value pairs in the cache, creating
 	// goroutines for each pair to individually wait for the respective key
 	// lock, test the eviction logic, and send the result to the results
 	// channel.
 	for key, atv := range s.data {
-		go func(key string, atv *atomicTimedValue[T], allPairs chan<- gcPair) {
+		go func(key K, atv *atomicTimedValue[T], allPairs chan<- gcPair[K]) {
 			if tv := atv.av.Load(); tv != nil {
-				allPairs <- gcPair{
+				allPairs <- gcPair[K]{
 					key:    key,
 					doomed: tv.IsExpiredAt(now),
 				}
@@ -211,7 +213,7 @@ func (s *Swarm[T]) GC() {
 	s.lock.RUnlock()
 
 	// COLLECT PHASE: Spawn goroutine to collect locked key-value pairs.
-	var doomed []string
+	var doomed []K
 	var receivedCount int
 loop:
 	for {
@@ -247,7 +249,7 @@ loop:
 // Load returns the value associated with the specified key, and a boolean value
 // indicating whether or not the key was found in the map. When the key is not
 // found, or its value has expired, the zero-value of T is returned.
-func (s *Swarm[T]) Load(key string) (T, bool) {
+func (s *Swarm[K, T]) Load(key K) (T, bool) {
 	var zero T
 
 	atomic.AddInt64(&s.stats.Queries, 1)
@@ -287,7 +289,7 @@ func (s *Swarm[T]) Load(key string) (T, bool) {
 
 // LoadTimedValue returns the SwarmTimedValue associated with the specified key,
 // or nil if the key is not found in the map.
-func (s *Swarm[T]) LoadTimedValue(key string) *SwarmTimedValue[T] {
+func (s *Swarm[K, T]) LoadTimedValue(key K) *SwarmTimedValue[T] {
 	atomic.AddInt64(&s.stats.Queries, 1)
 
 	// Do not want to use getOrCreateLockingTimeValue, because there's no reason
@@ -327,7 +329,7 @@ func (s *Swarm[T]) LoadTimedValue(key string) *SwarmTimedValue[T] {
 // map. When no value or an expired value is found on Query, a synchronous
 // lookup of a new value is triggered, then the new value is stored and
 // returned.
-func (s *Swarm[T]) Query(key string) (T, error) {
+func (s *Swarm[K, T]) Query(key K) (T, error) {
 	atomic.AddInt64(&s.stats.Queries, 1)
 
 	atv := s.getOrCreateAtomicTimedValue(key)
@@ -368,7 +370,7 @@ func (s *Swarm[T]) Query(key string) (T, error) {
 // function invoked with the specified key returns. This method does not block
 // access to the Swarm instance, allowing keys to be added and removed like
 // normal even while the callbacks are running.
-func (s *Swarm[T]) Range(callback func(key string, value *SwarmTimedValue[T])) {
+func (s *Swarm[K, T]) Range(callback func(key K, value *SwarmTimedValue[T])) {
 	// Need to have read lock while enumerating key-value pairs from map
 	s.lock.RLock()
 	for key, atv := range s.data {
@@ -398,7 +400,7 @@ func (s *Swarm[T]) Range(callback func(key string, value *SwarmTimedValue[T])) {
 // normal even while the callbacks are running. When the callback returns true,
 // this function performs an early termination of enumerating the cache,
 // returning true it its caller.
-func (s *Swarm[T]) RangeBreak(callback func(key string, value *SwarmTimedValue[T]) bool) bool {
+func (s *Swarm[K, T]) RangeBreak(callback func(key K, value *SwarmTimedValue[T]) bool) bool {
 	// Need to have read lock while enumerating key-value pairs from map
 	s.lock.RLock()
 	for key, atv := range s.data {
@@ -428,7 +430,7 @@ func (s *Swarm[T]) RangeBreak(callback func(key string, value *SwarmTimedValue[T
 // be reset when this method is invoked, allowing the client to determine the
 // number of each respective events that have taken place since the previous
 // time this method was invoked.
-func (s *Swarm[T]) Stats() Stats {
+func (s *Swarm[K, T]) Stats() Stats {
 	s.lock.RLock()
 	count := int64(len(s.data))
 	s.lock.RUnlock()
@@ -452,7 +454,7 @@ func (s *Swarm[T]) Stats() Stats {
 // previously stored. The value is wrapped in a SwarmTimedValue whose stale and
 // expiry times are derived from the configured GoodStaleDuration and
 // GoodExpiryDuration.
-func (s *Swarm[T]) Store(key string, value T) {
+func (s *Swarm[K, T]) Store(key K, value T) {
 	atomic.AddInt64(&s.stats.Stores, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
 	atv.av.Store(newTimedValue(value, nil, s.config.GoodStaleDuration, s.config.GoodExpiryDuration))
@@ -463,7 +465,7 @@ func (s *Swarm[T]) Store(key string, value T) {
 // durations are ignored, and the Stale and Expiry times of the provided
 // SwarmTimedValue are used. When its Created time is the zero-value, it is set
 // to the current time.
-func (s *Swarm[T]) StoreTimedValue(key string, tv *SwarmTimedValue[T]) {
+func (s *Swarm[K, T]) StoreTimedValue(key K, tv *SwarmTimedValue[T]) {
 	atomic.AddInt64(&s.stats.Stores, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
 	if tv.Created.IsZero() {
@@ -473,7 +475,7 @@ func (s *Swarm[T]) StoreTimedValue(key string, tv *SwarmTimedValue[T]) {
 }
 
 // Update forces an update of the value associated with the specified key.
-func (s *Swarm[T]) Update(key string) {
+func (s *Swarm[K, T]) Update(key K) {
 	atomic.AddInt64(&s.stats.Updates, 1)
 	atv := s.getOrCreateAtomicTimedValue(key)
 	s.update(key, atv)
@@ -481,7 +483,7 @@ func (s *Swarm[T]) Update(key string) {
 
 ////////////////////////////////////////
 
-func (s *Swarm[T]) run() {
+func (s *Swarm[K, T]) run() {
 	for {
 		select {
 		case <-time.After(s.config.GCPeriodicity):
@@ -494,7 +496,7 @@ func (s *Swarm[T]) run() {
 	}
 }
 
-func (s *Swarm[T]) getOrCreateAtomicTimedValue(key string) *atomicTimedValue[T] {
+func (s *Swarm[K, T]) getOrCreateAtomicTimedValue(key K) *atomicTimedValue[T] {
 	s.lock.RLock()
 	atv, ok := s.data[key]
 	s.lock.RUnlock()
@@ -516,7 +518,7 @@ func (s *Swarm[T]) getOrCreateAtomicTimedValue(key string) *atomicTimedValue[T] 
 // The update method attempts to update a new value for the specified key. If
 // the update is successful, it stores the value in the TimedValue associated
 // with the key.
-func (s *Swarm[T]) update(key string, atv *atomicTimedValue[T]) *SwarmTimedValue[T] {
+func (s *Swarm[K, T]) update(key K, atv *atomicTimedValue[T]) *SwarmTimedValue[T] {
 	value, err := s.config.Lookup(key)
 	if err == nil {
 		tv := newTimedValue(value, nil, s.config.GoodStaleDuration, s.config.GoodExpiryDuration)

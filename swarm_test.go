@@ -19,7 +19,7 @@ type point struct {
 
 func TestSwarmQueryReturnsTypedValue(t *testing.T) {
 	var invoked uint64
-	swarm, err := NewSwarm(&SwarmConfig[uint64]{Lookup: func(key string) (uint64, error) {
+	swarm, err := NewSwarm(&SwarmConfig[string, uint64]{Lookup: func(key string) (uint64, error) {
 		atomic.AddUint64(&invoked, 1)
 		return strconv.ParseUint(key, 10, 64)
 	}})
@@ -52,7 +52,7 @@ func TestSwarmQueryReturnsTypedValue(t *testing.T) {
 }
 
 func TestSwarmQueryLookupErrorReturnsZeroValue(t *testing.T) {
-	swarm, err := NewSwarm(&SwarmConfig[point]{Lookup: func(_ string) (point, error) {
+	swarm, err := NewSwarm(&SwarmConfig[string, point]{Lookup: func(_ string) (point, error) {
 		return point{}, errors.New("lookup failure")
 	}})
 	if err != nil {
@@ -70,7 +70,7 @@ func TestSwarmQueryLookupErrorReturnsZeroValue(t *testing.T) {
 }
 
 func TestSwarmNilConfig(t *testing.T) {
-	swarm, err := NewSwarm[string](nil)
+	swarm, err := NewSwarm[string, string](nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,14 +86,14 @@ func TestSwarmNilConfig(t *testing.T) {
 }
 
 func TestSwarmInvalidConfig(t *testing.T) {
-	_, err := NewSwarm(&SwarmConfig[int]{GoodStaleDuration: -time.Second})
+	_, err := NewSwarm(&SwarmConfig[string, int]{GoodStaleDuration: -time.Second})
 	if err == nil || !strings.Contains(err.Error(), "negative good stale duration") {
 		t.Errorf("GOT: %v; WANT: %v", err, "negative good stale duration")
 	}
 }
 
 func TestSwarmStoreAndLoad(t *testing.T) {
-	swarm, err := NewSwarm[point](nil)
+	swarm, err := NewSwarm[string, point](nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSwarmStoreAndLoad(t *testing.T) {
 }
 
 func TestSwarmStoreUsesConfiguredDurations(t *testing.T) {
-	swarm, err := NewSwarm(&SwarmConfig[int]{
+	swarm, err := NewSwarm(&SwarmConfig[string, int]{
 		GoodStaleDuration:  time.Minute,
 		GoodExpiryDuration: time.Hour,
 	})
@@ -162,7 +162,7 @@ func TestSwarmStoreUsesConfiguredDurations(t *testing.T) {
 
 func TestSwarmStoreTimedValue(t *testing.T) {
 	t.Run("expired", func(t *testing.T) {
-		swarm, err := NewSwarm[int](nil)
+		swarm, err := NewSwarm[string, int](nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -192,7 +192,7 @@ func TestSwarmStoreTimedValue(t *testing.T) {
 
 	t.Run("stale triggers asynchronous lookup", func(t *testing.T) {
 		var wg sync.WaitGroup
-		swarm, err := NewSwarm(&SwarmConfig[string]{Lookup: func(_ string) (string, error) {
+		swarm, err := NewSwarm(&SwarmConfig[string, string]{Lookup: func(_ string) (string, error) {
 			defer wg.Done()
 			return "new", nil
 		}})
@@ -227,7 +227,7 @@ func TestSwarmStoreTimedValue(t *testing.T) {
 }
 
 func TestSwarmRange(t *testing.T) {
-	swarm, err := NewSwarm[int](nil)
+	swarm, err := NewSwarm[string, int](nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestSwarmRange(t *testing.T) {
 }
 
 func TestSwarmGC(t *testing.T) {
-	swarm, err := NewSwarm(&SwarmConfig[string]{
+	swarm, err := NewSwarm(&SwarmConfig[string, string]{
 		GCPeriodicity: 10 * time.Millisecond,
 		GCTimeout:     10 * time.Millisecond,
 	})
@@ -281,6 +281,76 @@ func TestSwarmGC(t *testing.T) {
 	}
 
 	if got, want := swarm.Close(), error(nil); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+}
+
+func TestSwarmIntegerKeys(t *testing.T) {
+	var invoked uint64
+	swarm, err := NewSwarm(&SwarmConfig[int64, string]{Lookup: func(key int64) (string, error) {
+		atomic.AddUint64(&invoked, 1)
+		return strconv.FormatInt(key, 10), nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = swarm.Close() }()
+
+	for i := 0; i < 2; i++ {
+		value, err := swarm.Query(42)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := value, "42"; got != want {
+			t.Errorf("GOT: %v; WANT: %v", got, want)
+		}
+	}
+	if got, want := atomic.LoadUint64(&invoked), uint64(1); got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	swarm.Store(-1, "negative one")
+	if value, ok := swarm.Load(-1); !ok || value != "negative one" {
+		t.Errorf("GOT: %q, %v; WANT: %q, %v", value, ok, "negative one", true)
+	}
+	swarm.Delete(-1)
+	if _, ok := swarm.Load(-1); ok {
+		t.Errorf("GOT: %v; WANT: %v", ok, false)
+	}
+}
+
+func TestSwarmStructKeys(t *testing.T) {
+	swarm, err := NewSwarm(&SwarmConfig[point, int]{Lookup: func(key point) (int, error) {
+		return key.X * key.Y, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = swarm.Close() }()
+
+	value, err := swarm.Query(point{X: 3, Y: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := value, 12; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	swarm.StoreTimedValue(point{X: 1, Y: 1}, &SwarmTimedValue[int]{Value: 100, Expiry: time.Now().Add(-time.Minute)})
+
+	keys := make(map[point]int)
+	swarm.Range(func(key point, value *SwarmTimedValue[int]) {
+		keys[key] = value.Value
+	})
+	if got, want := len(keys), 1; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+	if got, want := keys[point{X: 3, Y: 4}], 12; got != want {
+		t.Errorf("GOT: %v; WANT: %v", got, want)
+	}
+
+	swarm.GC()
+	if got, want := swarm.Stats().Evictions, int64(1); got != want {
 		t.Errorf("GOT: %v; WANT: %v", got, want)
 	}
 }

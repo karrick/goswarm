@@ -68,14 +68,15 @@ lookup function to fetch the value for that key.
 
 ## Storing Values Of A Specific Type With Generics
 
-When all values stored in the map have the same type, use `NewSwarm`
-to create a `Swarm` instance with a type parameter specifying the
-type of the values. It provides the same methods as `Simple`, but
-values returned by `Load` and `Query` have the specified type, so
-there is no need for type assertions. This requires Go 1.19 or above.
+Use `NewSwarm` to create a `Swarm` instance with type parameters
+specifying the type of the keys, which may be any comparable type,
+and the type of the values. It provides the same methods as `Simple`,
+but keys have the specified type, and values returned by `Load` and
+`Query` have the specified type, so there is no need for type
+assertions. This requires Go 1.19 or above.
 
 ```Go
-    swarm, err := goswarm.NewSwarm(&goswarm.SwarmConfig[uint64]{
+    swarm, err := goswarm.NewSwarm(&goswarm.SwarmConfig[string, uint64]{
         GoodStaleDuration:  time.Minute,
         GoodExpiryDuration: 24 * time.Hour,
         Lookup: func(key string) (uint64, error) {
@@ -106,16 +107,34 @@ there is no need for type assertions. This requires Go 1.19 or above.
     })
 ```
 
-When no configuration is required, the type parameter must be
+Keys are not limited to strings:
+
+```Go
+    type point struct{ X, Y int }
+
+    swarm, err := goswarm.NewSwarm(&goswarm.SwarmConfig[point, float64]{
+        Lookup: func(p point) (float64, error) {
+            return math.Hypot(float64(p.X), float64(p.Y)), nil
+        },
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer func() { _ = swarm.Close() }()
+
+    distance, err := swarm.Query(point{X: 3, Y: 4}) // 5
+```
+
+When no configuration is required, the type parameters must be
 provided explicitly:
 
 ```Go
-    swarm, err := goswarm.NewSwarm[string](nil)
+    swarm, err := goswarm.NewSwarm[int64, string](nil)
 ```
 
-`Simple` is implemented using `Swarm[interface{}]`, and `Config` and
-`TimedValue` are aliases for `SwarmConfig[interface{}]` and
-`SwarmTimedValue[interface{}]`, respectively.
+`Simple` is implemented using `Swarm[string, interface{}]`, and
+`Config` and `TimedValue` are aliases for `SwarmConfig[string,
+interface{}]` and `SwarmTimedValue[interface{}]`, respectively.
 
 ## Stale-While-Revalidate and Stale-If-Error
 

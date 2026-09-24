@@ -13,7 +13,7 @@ package goswarm
 // type assertions on values returned by Load and Query. Consider using Swarm,
 // created by NewSwarm, to store values of a specific type.
 type Simple struct {
-	swarm *Swarm[interface{}]
+	swarm *Swarm[string, interface{}]
 }
 
 // NewSimple returns Swarm that attempts to respond to Query methods by
