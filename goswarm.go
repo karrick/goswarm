@@ -5,11 +5,17 @@ import "time"
 // Querier specifies a type that provides memoizing the results of expensive function calls and
 // returning the cached result when the same input key occurs again.
 type Querier interface {
-	Query(string) (interface{}, error)
+	Query(string) (any, error)
 }
 
-// Config specifies the configuration parameters for a Swarm instance.
-type Config struct {
+// Config specifies the configuration parameters for a Simple instance. It is
+// an alias of SwarmConfig instantiated with string keys and any values.
+type Config = SwarmConfig[string, any]
+
+// SwarmConfig specifies the configuration parameters for a Swarm instance. The
+// type parameter K specifies the type of the keys, and the type parameter T
+// specifies the type of the values stored in the Swarm.
+type SwarmConfig[K comparable, T any] struct {
 	// GoodStaleDuration specifies how long a value remains fresh in the data map. A zero-value
 	// time.Duration value implies the value never stales, and updates will only be fetched
 	// after the value expires.
@@ -34,7 +40,7 @@ type Config struct {
 	// Lookup specifies the user callback function to invoke when looking up the value to be
 	// associated with a stale key, expired key, or a key that has yet to be loaded into the
 	// data map.
-	Lookup func(string) (interface{}, error)
+	Lookup func(K) (T, error)
 
 	// GCPeriodicity specifies how frequently the data map purges expired entries.
 	GCPeriodicity time.Duration
